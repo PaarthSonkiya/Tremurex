@@ -12,6 +12,10 @@ services:
       REDIS_URL: redis://redis:6379
       SCHEMA_ENGINE_URL: http://schema-engine:8000
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      ALERT_THRESHOLD: ${ALERT_THRESHOLD:-WARNING}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-}
     depends_on:
       postgres:
         condition: service_healthy

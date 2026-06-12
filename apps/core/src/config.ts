@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+/** docker compose interpolates unset vars to '' — treat that as absent. */
+const blankAsAbsent = (value: unknown): unknown => (value === '' ? undefined : value);
+
 /** All config from env, Zod-validated (§5). Secrets never come from code. */
 const EnvSchema = z.object({
   DATABASE_URL: z.string().default('postgres://tremurex:tremurex@localhost:5432/tremurex'),
@@ -10,9 +13,9 @@ const EnvSchema = z.object({
   /** Default alert threshold for new dependencies; per-dependency overrides. */
   ALERT_THRESHOLD: z.enum(['BREAKING', 'WARNING', 'INFO']).default('WARNING'),
   /** Alert destinations — user-configured only (§7.1). Absent = channel off. */
-  ALERT_WEBHOOK_URL: z.url().optional(),
-  SLACK_BOT_TOKEN: z.string().optional(),
-  SLACK_CHANNEL: z.string().optional(),
+  ALERT_WEBHOOK_URL: z.preprocess(blankAsAbsent, z.url().optional()),
+  SLACK_BOT_TOKEN: z.preprocess(blankAsAbsent, z.string().optional()),
+  SLACK_CHANNEL: z.preprocess(blankAsAbsent, z.string().optional()),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema>;

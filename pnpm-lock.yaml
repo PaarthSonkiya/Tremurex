@@ -100,6 +100,28 @@ importers:
 
   packages/shared: {}
 
+  tests/e2e:
+    dependencies:
+      '@tremurex/mock-api':
+        specifier: workspace:*
+        version: link:../mock-api
+      fastify:
+        specifier: ^5.8.5
+        version: 5.8.5
+      pg:
+        specifier: ^8.21.0
+        version: 8.21.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.20.0
+        version: 8.20.0
+
+  tests/mock-api:
+    devDependencies:
+      tsx:
+        specifier: ^4.22.4
+        version: 4.22.4
+
 packages:
 
   '@drizzle-team/brocli@0.10.2':
