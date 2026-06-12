@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { PACKAGE_NAME } from './index.js';
+import * as shared from './index.js';
 
-describe('shared package harness', () => {
-  it('exports the package name', () => {
-    expect(PACKAGE_NAME).toBe('@tremurex/shared');
+describe('public surface', () => {
+  it('re-exports the domain model and helpers', () => {
+    expect(shared.Severity.Breaking).toBe('BREAKING');
+    expect(shared.SCHEMA_DIALECT).toContain('2020-12');
+    expect(Object.keys(shared.REST_RULES)).toHaveLength(10);
+    expect(shared.formatJsonPath(['a', 0])).toBe('$.a[0]');
+    expect(shared.hasDrift({ entries: [] })).toBe(false);
   });
 });
