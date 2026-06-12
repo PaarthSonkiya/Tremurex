@@ -1,0 +1,21 @@
+{
+  "description": "A field observed as both an object and a scalar cannot merge into a type union and becomes anyOf (branch order is genson's, deterministic for identical inputs).",
+  "samples": [{ "value": { "a": 1 } }, { "value": "s" }],
+  "expected_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "value": {
+        "anyOf": [
+          { "type": "string" },
+          {
+            "properties": { "a": { "type": "integer" } },
+            "required": ["a"],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "required": ["value"],
+    "type": "object"
+  }
+}

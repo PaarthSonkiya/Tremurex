@@ -1,0 +1,25 @@
+{
+  "description": "Array elements with varying shapes merge into one items schema; element fields present in only some elements are optional.",
+  "samples": [
+    { "results": [{ "id": 1, "label": "x" }, { "id": 2 }] },
+    { "results": [{ "id": 3, "label": "y" }] }
+  ],
+  "expected_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "results": {
+        "items": {
+          "properties": {
+            "id": { "type": "integer" },
+            "label": { "type": "string" }
+          },
+          "required": ["id"],
+          "type": "object"
+        },
+        "type": "array"
+      }
+    },
+    "required": ["results"],
+    "type": "object"
+  }
+}

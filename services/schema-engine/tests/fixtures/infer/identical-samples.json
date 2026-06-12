@@ -1,0 +1,17 @@
+{
+  "description": "N identical samples merge to exactly the single-sample schema.",
+  "samples": [
+    { "id": 1, "name": "a" },
+    { "id": 1, "name": "a" },
+    { "id": 1, "name": "a" }
+  ],
+  "expected_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "id": { "type": "integer" },
+      "name": { "type": "string" }
+    },
+    "required": ["id", "name"],
+    "type": "object"
+  }
+}

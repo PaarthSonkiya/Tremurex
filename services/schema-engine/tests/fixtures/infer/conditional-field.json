@@ -1,0 +1,13 @@
+{
+  "description": "THE core multi-sample case (CLAUDE.md §8): a field present in only some samples must come back optional — in properties but not in required. This is what stops conditional fields from producing false positives.",
+  "samples": [{ "id": 1, "email": "a@example.com" }, { "id": 2 }, { "id": 3, "email": "b@example.com" }],
+  "expected_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "email": { "type": "string" },
+      "id": { "type": "integer" }
+    },
+    "required": ["id"],
+    "type": "object"
+  }
+}

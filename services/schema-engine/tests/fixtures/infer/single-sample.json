@@ -1,0 +1,15 @@
+{
+  "description": "One sample: every observed field is required, scalar types inferred.",
+  "samples": [{ "id": 1, "name": "a", "score": 1.5, "ok": true }],
+  "expected_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "id": { "type": "integer" },
+      "name": { "type": "string" },
+      "ok": { "type": "boolean" },
+      "score": { "type": "number" }
+    },
+    "required": ["id", "name", "ok", "score"],
+    "type": "object"
+  }
+}

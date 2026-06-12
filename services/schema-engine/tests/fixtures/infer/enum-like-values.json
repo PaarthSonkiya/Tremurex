@@ -1,0 +1,17 @@
+{
+  "description": "Decision 2026-06-12: NO enum inference in v1. A low-cardinality string field is indistinguishable from undersampled free text, and inferred enums would cause false enum-value-removed WARNINGs (alert fatigue, CLAUDE.md §2). Enum diff rules apply to hand-written schemas only. This golden pins the behavior: status stays a plain string.",
+  "samples": [
+    { "status": "active" },
+    { "status": "inactive" },
+    { "status": "active" },
+    { "status": "active" }
+  ],
+  "expected_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "status": { "type": "string" }
+    },
+    "required": ["status"],
+    "type": "object"
+  }
+}

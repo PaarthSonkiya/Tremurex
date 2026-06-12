@@ -1,0 +1,16 @@
+{
+  "description": "Mixed-type array elements (including null) merge into one sorted items type union; an empty array elsewhere stays a bare array.",
+  "samples": [{ "xs": [1, "a", null], "ys": [] }],
+  "expected_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "xs": {
+        "items": { "type": ["integer", "null", "string"] },
+        "type": "array"
+      },
+      "ys": { "type": "array" }
+    },
+    "required": ["xs", "ys"],
+    "type": "object"
+  }
+}

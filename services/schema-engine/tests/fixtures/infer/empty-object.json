@@ -1,0 +1,8 @@
+{
+  "description": "An empty object sample yields a bare object schema — no properties, no required.",
+  "samples": [{}],
+  "expected_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object"
+  }
+}

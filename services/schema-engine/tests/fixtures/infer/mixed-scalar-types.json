@@ -1,0 +1,16 @@
+{
+  "description": "A field observed as integer and string merges to a sorted type union; integer + float widens to plain number.",
+  "samples": [
+    { "code": 1, "amount": 10 },
+    { "code": "A1", "amount": 10.5 }
+  ],
+  "expected_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "amount": { "type": "number" },
+      "code": { "type": ["integer", "string"] }
+    },
+    "required": ["amount", "code"],
+    "type": "object"
+  }
+}

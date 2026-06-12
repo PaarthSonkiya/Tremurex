@@ -1,0 +1,27 @@
+{
+  "description": "Required/optional marking applies recursively: user.phone is conditionally present inside a nested object.",
+  "samples": [
+    { "user": { "name": "a", "phone": "123" }, "meta": { "page": 1 } },
+    { "user": { "name": "b" }, "meta": { "page": 2 } }
+  ],
+  "expected_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "meta": {
+        "properties": { "page": { "type": "integer" } },
+        "required": ["page"],
+        "type": "object"
+      },
+      "user": {
+        "properties": {
+          "name": { "type": "string" },
+          "phone": { "type": "string" }
+        },
+        "required": ["name"],
+        "type": "object"
+      }
+    },
+    "required": ["meta", "user"],
+    "type": "object"
+  }
+}
