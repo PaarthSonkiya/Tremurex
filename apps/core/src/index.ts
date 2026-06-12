@@ -1,3 +1,10 @@
+import {
+  createAlertDispatcher,
+  createSlackChannel,
+  createSlackClient,
+  createWebhookChannel,
+} from './alerting/alerting.js';
+import type { AlertChannel } from './alerting/alerting.js';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db/client.js';
@@ -18,7 +25,23 @@ const { db, pool } = createDb(config.DATABASE_URL);
 await runMigrations(db);
 
 const inference = createSchemaEngineClient(config.SCHEMA_ENGINE_URL);
-const pipeline = createPipeline({ db, inference });
+
+// Alert destinations come only from user config (§7.1).
+const channels: AlertChannel[] = [];
+if (config.ALERT_WEBHOOK_URL) {
+  channels.push(createWebhookChannel(config.ALERT_WEBHOOK_URL));
+}
+if (config.SLACK_BOT_TOKEN && config.SLACK_CHANNEL) {
+  channels.push(
+    createSlackChannel(config.SLACK_CHANNEL, createSlackClient(config.SLACK_BOT_TOKEN)),
+  );
+}
+
+const pipeline = createPipeline({
+  db,
+  inference,
+  dispatchAlert: createAlertDispatcher(db, channels),
+});
 
 const queue = createPollingQueue(config.REDIS_URL);
 const worker = createPollingWorker(config.REDIS_URL, async (dependencyId) => {

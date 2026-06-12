@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@slack/web-api": "^7.17.0",
     "@tremurex/shared": "workspace:*",
     "bullmq": "^5.78.0",
     "drizzle-orm": "^0.45.2",
