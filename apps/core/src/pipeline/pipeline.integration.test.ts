@@ -178,6 +178,31 @@ describe('poll pipeline end-to-end against Postgres', () => {
     expect(await db.select().from(diffs)).toHaveLength(0);
   });
 
+  it('persistent drift alerts once, then is suppressed until it changes or resolves', async () => {
+    const { dep, pipeline, sentAlerts, setResponse } = await setup({ window: 1 });
+    await pipeline.processPoll(dep.id); // locks baseline {id, name}
+
+    // Drift appears and stays: only the first poll alerts.
+    setResponse({ name: 'a' });
+    expect(await pipeline.processPoll(dep.id)).toMatchObject({ alerted: true });
+    expect(await pipeline.processPoll(dep.id)).toMatchObject({
+      alerted: false,
+      outcome: { drift: { repeat: true } },
+    });
+    expect(await pipeline.processPoll(dep.id)).toMatchObject({ alerted: false });
+    expect(sentAlerts).toHaveLength(1);
+    expect(await db.select().from(diffs)).toHaveLength(1);
+
+    // The provider recovers (resolves the open diff), then breaks again:
+    // that is fresh drift and alerts again.
+    setResponse({ id: 1, name: 'a' });
+    await pipeline.processPoll(dep.id);
+    setResponse({ name: 'a' });
+    expect(await pipeline.processPoll(dep.id)).toMatchObject({ alerted: true });
+    expect(sentAlerts).toHaveLength(2);
+    expect(await db.select().from(diffs)).toHaveLength(2);
+  });
+
   it('skips disabled dependencies without fetching', async () => {
     const { dep, pipeline } = await setup();
     await db.update(dependencies).set({ enabled: false });

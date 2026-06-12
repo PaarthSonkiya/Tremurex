@@ -53,9 +53,19 @@ export function TimelineView({
                   >
                     <span>
                       <span className={`badge ${event.severity}`}>{event.severity}</span> drift ·{' '}
-                      {event.entryCount} change{event.entryCount === 1 ? '' : 's'}
+                      {event.entryCount} change{event.entryCount === 1 ? '' : 's'}{' '}
+                      {event.resolvedAt === null ? (
+                        <span className="badge active">active</span>
+                      ) : (
+                        <span className="badge resolved">resolved</span>
+                      )}
                     </span>
-                    <span className="when">{formatInstant(event.at)}</span>
+                    <span className="when">
+                      {formatInstant(event.at)}
+                      {event.lastSeenAt !== event.at && (
+                        <> · last seen {formatInstant(event.lastSeenAt)}</>
+                      )}
+                    </span>
                   </button>
                 ) : (
                   <div key={event.id} className="row event locked">

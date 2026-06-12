@@ -168,6 +168,15 @@ body {
   color: var(--ink-dim);
 }
 
+.badge.active {
+  color: var(--amber);
+}
+
+.badge.resolved {
+  color: var(--ink-dim);
+  border-style: dashed;
+}
+
 .badge.monitoring {
   color: var(--amber);
 }

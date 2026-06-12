@@ -28,7 +28,15 @@ export interface Dependency {
 
 export type TimelineEvent =
   | { type: 'baseline-locked'; id: string; at: string; sampleCount: number }
-  | { type: 'drift'; id: string; at: string; severity: Severity; entryCount: number };
+  | {
+      type: 'drift';
+      id: string;
+      at: string;
+      severity: Severity;
+      entryCount: number;
+      lastSeenAt: string;
+      resolvedAt: string | null;
+    };
 
 export interface Timeline {
   dependency: Dependency;
@@ -42,6 +50,8 @@ export interface DiffDetail {
   dependency: { id: string; name: string } | null;
   severity: Severity;
   createdAt: string;
+  lastSeenAt: string;
+  resolvedAt: string | null;
   entries: DiffEntry[];
   capturedSchema: unknown;
   baselineSchema: unknown;

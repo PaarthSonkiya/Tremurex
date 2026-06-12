@@ -108,6 +108,8 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
         at: d.createdAt.toISOString(),
         severity: d.severity,
         entryCount: d.entries.length,
+        lastSeenAt: d.lastSeenAt.toISOString(),
+        resolvedAt: d.resolvedAt?.toISOString() ?? null,
       })),
     ].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 
@@ -139,6 +141,8 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
       dependency: dependency ? { id: dependency.id, name: dependency.name } : null,
       severity: diffRow.severity,
       createdAt: diffRow.createdAt.toISOString(),
+      lastSeenAt: diffRow.lastSeenAt.toISOString(),
+      resolvedAt: diffRow.resolvedAt?.toISOString() ?? null,
       entries: diffRow.entries,
       capturedSchema: diffRow.capturedSchema,
       baselineSchema: baseline?.schema ?? null,

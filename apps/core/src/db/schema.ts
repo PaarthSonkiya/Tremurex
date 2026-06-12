@@ -65,6 +65,10 @@ export const diffs = pgTable('diffs', {
   severity: text('severity').$type<Severity>().notNull(),
   capturedSchema: jsonb('captured_schema').$type<JsonSchema>().notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  /** Bumped (not re-inserted) when a capture repeats this exact drift. */
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  /** Set when a later capture is clean or drifts differently (superseded). */
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
 });
 
 export const alerts = pgTable('alerts', {

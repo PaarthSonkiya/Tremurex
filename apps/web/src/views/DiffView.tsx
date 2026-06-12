@@ -32,7 +32,17 @@ export function DiffView({ diffId, onBack }: { diffId: string; onBack: () => voi
               <span className={`badge ${data.severity}`}>{data.severity}</span> drift in{' '}
               {data.dependency?.name ?? 'unknown dependency'}
             </h2>
-            <p className="microlabel">detected {formatInstant(data.createdAt)}</p>
+            <p className="microlabel">
+              detected {formatInstant(data.createdAt)}
+              {data.lastSeenAt !== data.createdAt && (
+                <> · last seen {formatInstant(data.lastSeenAt)}</>
+              )}
+              {data.resolvedAt !== null ? (
+                <> · resolved {formatInstant(data.resolvedAt)}</>
+              ) : (
+                <> · still drifting</>
+              )}
+            </p>
           </div>
           <div className="panel">
             {data.entries.map((entry, i) => (

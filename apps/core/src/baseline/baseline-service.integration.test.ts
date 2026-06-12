@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import pg from 'pg';
 import { createDiffEntry } from '@tremurex/shared';
-import type { JsonSchema, JsonValue } from '@tremurex/shared';
+import type { Diff, JsonSchema, JsonValue } from '@tremurex/shared';
 import { createDb } from '../db/client.js';
 import type { Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
@@ -175,5 +175,99 @@ describe('monitoring after lock', () => {
     await expect(
       service.recordCapture('00000000-0000-0000-0000-000000000000', { id: 1 }),
     ).rejects.toThrow(/Unknown dependency/);
+  });
+});
+
+describe('drift dedup (user-approved 2026-06-12): identical repeats are suppressed', () => {
+  /** Differ whose output the test scripts between captures. */
+  function scriptedDiffer() {
+    let current: Diff = { entries: [] };
+    return {
+      set: (d: Diff): void => {
+        current = d;
+      },
+      diff: (): Diff => current,
+    };
+  }
+
+  const driftA: Diff = {
+    entries: [createDiffEntry('required-field-removed', ['id'], { before: { type: 'integer' } })],
+  };
+  const driftB: Diff = {
+    entries: [
+      createDiffEntry('field-type-changed', ['email'], {
+        before: { type: 'string' },
+        after: { type: 'number' },
+      }),
+    ],
+  };
+
+  async function lockedScripted() {
+    const differ = scriptedDiffer();
+    const service = createBaselineService(db, fakeInference(MERGED), differ.diff);
+    const depId = await insertDependency(1);
+    await service.recordCapture(depId, { id: 1 }); // locks immediately (window 1)
+    return { service, depId, differ };
+  }
+
+  it('a byte-identical repeat bumps lastSeenAt on the open diff, stores nothing, fires nothing new', async () => {
+    const { service, depId, differ } = await lockedScripted();
+    differ.set(driftA);
+
+    const first = await service.recordCapture(depId, { email: 'a@x.com' });
+    if (first.phase !== 'monitoring' || first.drift === null) throw new Error('expected drift');
+    expect(first.drift.repeat).toBe(false);
+
+    const again = await service.recordCapture(depId, { email: 'a@x.com' });
+    if (again.phase !== 'monitoring' || again.drift === null) throw new Error('expected drift');
+    expect(again.drift.repeat).toBe(true);
+    expect(again.drift.diffRow.id).toBe(first.drift.diffRow.id);
+    expect(again.drift.severity).toBe('BREAKING');
+
+    const stored = await db.select().from(diffs);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.lastSeenAt.getTime()).toBeGreaterThanOrEqual(
+      first.drift.diffRow.lastSeenAt.getTime(),
+    );
+    expect(stored[0]?.resolvedAt).toBeNull();
+  });
+
+  it('different drift resolves the open diff and stores a fresh one', async () => {
+    const { service, depId, differ } = await lockedScripted();
+    differ.set(driftA);
+    const first = await service.recordCapture(depId, {});
+    if (first.phase !== 'monitoring' || first.drift === null) throw new Error('expected drift');
+
+    differ.set(driftB);
+    const second = await service.recordCapture(depId, {});
+    if (second.phase !== 'monitoring' || second.drift === null) throw new Error('expected drift');
+    expect(second.drift.repeat).toBe(false);
+    expect(second.drift.diffRow.id).not.toBe(first.drift.diffRow.id);
+
+    const stored = await db.select().from(diffs);
+    expect(stored).toHaveLength(2);
+    const firstId = first.drift.diffRow.id;
+    const old = stored.find((d) => d.id === firstId);
+    expect(old?.resolvedAt).not.toBeNull();
+  });
+
+  it('a clean capture resolves the open diff; the same drift reappearing is fresh again', async () => {
+    const { service, depId, differ } = await lockedScripted();
+    differ.set(driftA);
+    const first = await service.recordCapture(depId, {});
+    if (first.phase !== 'monitoring' || first.drift === null) throw new Error('expected drift');
+
+    differ.set({ entries: [] });
+    const clean = await service.recordCapture(depId, { id: 2 });
+    expect(clean).toEqual({ phase: 'monitoring', drift: null });
+    const afterClean = await db.select().from(diffs);
+    expect(afterClean[0]?.resolvedAt).not.toBeNull();
+
+    differ.set(driftA);
+    const back = await service.recordCapture(depId, {});
+    if (back.phase !== 'monitoring' || back.drift === null) throw new Error('expected drift');
+    expect(back.drift.repeat).toBe(false);
+    expect(back.drift.diffRow.id).not.toBe(first.drift.diffRow.id);
+    expect(await db.select().from(diffs)).toHaveLength(2);
   });
 });

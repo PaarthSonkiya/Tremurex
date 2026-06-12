@@ -89,3 +89,34 @@ export function countBySeverity(diff: Diff): Record<Severity, number> {
 export function hasDrift(diff: Diff): boolean {
   return diff.entries.length > 0;
 }
+
+/** Recursively sort object keys so JSONB round-trips compare byte-stably. */
+function canonicalize(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) {
+    return value.map(canonicalize);
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalize(value[key] as JsonValue)]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Whether two entry lists describe the same drift — the dedup fingerprint
+ * (user-approved 2026-06-12): a capture whose diff is identical to the open
+ * diff against the same baseline is a repeat, not new drift. Order-sensitive
+ * by design; the diff engine is deterministic (§7.4), so the same drift
+ * always emits the same order.
+ */
+export function sameDiffEntries(a: readonly DiffEntry[], b: readonly DiffEntry[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every(
+    (entry, i) =>
+      JSON.stringify(canonicalize(entry as unknown as JsonValue)) ===
+      JSON.stringify(canonicalize(b[i] as unknown as JsonValue)),
+  );
+}

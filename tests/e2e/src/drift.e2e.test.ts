@@ -134,7 +134,16 @@ describe('drift lifecycle, end to end', () => {
       outcome: { phase: 'monitoring', drift: { severity: 'BREAKING' } },
     });
 
-    // 6. The webhook got exactly one correctly classified payload.
+    // 6. The drift persists: the repeat is suppressed — no new diff, no
+    //    second alert (dedup, user-approved 2026-06-12).
+    const repeat = await pipeline.processPoll(depId);
+    expect(repeat).toMatchObject({
+      status: 'ok',
+      alerted: false,
+      outcome: { phase: 'monitoring', drift: { severity: 'BREAKING', repeat: true } },
+    });
+
+    // 7. The webhook got exactly one correctly classified payload.
     expect(webhook.received).toHaveLength(1);
     const payload = webhook.received[0] as AlertPayloadWire;
     expect(payload.event).toBe('drift-detected');
@@ -147,20 +156,25 @@ describe('drift lifecycle, end to end', () => {
       expect.objectContaining({ rule: 'field-type-changed', path: '$.id' }),
     );
 
-    // 7. Timeline and diff views expose the whole story.
+    // 8. Timeline and diff views expose the whole story; the repeat added no
+    //    event, the superseded INFO drift reads resolved, the BREAKING one open.
     const timeline = await app.inject({
       method: 'GET',
       url: `/dependencies/${depId}/timeline`,
     });
-    const events = timeline.json<{ events: { type: string; severity?: string }[] }>().events;
+    const events = timeline.json<{
+      events: { type: string; severity?: string; resolvedAt?: string | null }[];
+    }>().events;
     expect(events.map((e) => e.type)).toEqual(['drift', 'drift', 'baseline-locked']);
     expect(events.map((e) => e.severity)).toEqual(['BREAKING', 'INFO', undefined]);
+    expect(events[0]?.resolvedAt).toBeNull();
+    expect(events[1]?.resolvedAt).not.toBeNull();
 
     const diffView = await app.inject({ method: 'GET', url: `/diffs/${payload.diffId}` });
     expect(diffView.statusCode).toBe(200);
     expect(diffView.json<{ severity: string }>().severity).toBe('BREAKING');
 
-    // 8. Alert history recorded the delivery.
+    // 9. Alert history recorded the delivery.
     const history = await db.select().from(alerts);
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({

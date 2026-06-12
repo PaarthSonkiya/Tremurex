@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { REST_RULES, countBySeverity, createDiffEntry, diffSeverity, hasDrift } from './diff.js';
+import {
+  REST_RULES,
+  countBySeverity,
+  createDiffEntry,
+  diffSeverity,
+  hasDrift,
+  sameDiffEntries,
+} from './diff.js';
 import { Severity } from './severity.js';
-import type { Diff } from './diff.js';
+import type { Diff, DiffEntry } from './diff.js';
 
 describe('REST_RULES — one assertion per row of the CLAUDE.md §8 REST severity matrix', () => {
   it('required field removed → BREAKING', () => {
@@ -100,5 +107,43 @@ describe('diff helpers', () => {
   it('hasDrift is false only for an empty diff', () => {
     expect(hasDrift(diff)).toBe(true);
     expect(hasDrift(empty)).toBe(false);
+  });
+});
+
+describe('sameDiffEntries — the dedup fingerprint (user-approved, 2026-06-12)', () => {
+  const removal = createDiffEntry('required-field-removed', ['price'], {
+    before: { type: 'object', properties: { amount: { type: 'number' } } },
+  });
+  const typeChange = createDiffEntry('field-type-changed', ['id'], {
+    before: { type: 'integer' },
+    after: { type: 'string' },
+  });
+
+  it('identical entry lists are the same drift', () => {
+    expect(sameDiffEntries([removal, typeChange], [removal, typeChange])).toBe(true);
+    expect(sameDiffEntries([], [])).toBe(true);
+  });
+
+  it('survives JSONB round-trips: object key order does not matter', () => {
+    // Postgres JSONB reorders keys; a stored entry must still fingerprint
+    // equal to a freshly computed one.
+    const stored = JSON.parse(
+      '{"rule":"field-type-changed","severity":"BREAKING","path":"$.id","after":{"type":"string"},"before":{"type":"integer"}}',
+    ) as DiffEntry;
+    expect(sameDiffEntries([stored], [typeChange])).toBe(true);
+  });
+
+  it('different rules, paths, fragments, lengths, or order are different drift', () => {
+    expect(sameDiffEntries([removal], [typeChange])).toBe(false);
+    expect(sameDiffEntries([removal], [removal, typeChange])).toBe(false);
+    expect(sameDiffEntries([removal, typeChange], [typeChange, removal])).toBe(false);
+    const otherPath = createDiffEntry('required-field-removed', ['cost'], {
+      before: { type: 'object', properties: { amount: { type: 'number' } } },
+    });
+    expect(sameDiffEntries([removal], [otherPath])).toBe(false);
+    const otherFragment = createDiffEntry('required-field-removed', ['price'], {
+      before: { type: 'number' },
+    });
+    expect(sameDiffEntries([removal], [otherFragment])).toBe(false);
   });
 });

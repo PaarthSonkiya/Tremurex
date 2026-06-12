@@ -63,6 +63,8 @@ export function createPipeline(opts: {
     if (
       outcome.phase === 'monitoring' &&
       outcome.drift !== null &&
+      // Dedup: an identical repeat of the open drift never re-alerts.
+      !outcome.drift.repeat &&
       meetsThreshold(outcome.drift.severity, dependency.alertThreshold)
     ) {
       await dispatchAlert({
