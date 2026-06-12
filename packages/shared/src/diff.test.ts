@@ -35,8 +35,15 @@ describe('REST_RULES — one assertion per row of the CLAUDE.md §8 REST severit
     expect(REST_RULES['enum-value-added']).toBe(Severity.Info);
   });
 
-  it('covers exactly the 10 REST matrix rows', () => {
-    expect(Object.keys(REST_RULES)).toHaveLength(10);
+  it('required field became optional → WARNING (user-approved extension, 2026-06-12)', () => {
+    // Not in the §8 matrix; approved as rule 11. A field that was always
+    // present may now be absent — same consumer-risk class as
+    // optional-field-removed. Only fires in baseline-vs-baseline diffs.
+    expect(REST_RULES['required-field-became-optional']).toBe(Severity.Warning);
+  });
+
+  it('covers the 10 REST matrix rows plus the approved extension', () => {
+    expect(Object.keys(REST_RULES)).toHaveLength(11);
   });
 });
 

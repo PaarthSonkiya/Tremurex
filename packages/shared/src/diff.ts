@@ -17,6 +17,10 @@ export const REST_RULES = {
   'structure-changed': Severity.Breaking,
   'array-element-type-changed': Severity.Breaking,
   'optional-field-removed': Severity.Warning,
+  // User-approved extension (2026-06-12), not in the §8 matrix: a field that
+  // was always present may now be intermittently absent. Same consumer-risk
+  // class as optional-field-removed. Baseline-vs-baseline diffs only.
+  'required-field-became-optional': Severity.Warning,
   'field-became-nullable': Severity.Warning,
   'enum-value-removed': Severity.Warning,
   'field-added': Severity.Info,
