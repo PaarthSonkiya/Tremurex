@@ -4,6 +4,7 @@ export type { JsonPathSegment } from './json-path.js';
 export { SCHEMA_DIALECT, isNullable, schemaTypes } from './json-schema.js';
 export type { JsonObject, JsonSchema, JsonSchemaTypeName, JsonValue } from './json-schema.js';
 export {
+  MCP_RULES,
   REST_RULES,
   countBySeverity,
   createDiffEntry,
@@ -11,4 +12,4 @@ export {
   hasDrift,
   sameDiffEntries,
 } from './diff.js';
-export type { Diff, DiffEntry, RestRuleId } from './diff.js';
+export type { Diff, DiffEntry, McpRuleId, RestRuleId, RuleId } from './diff.js';

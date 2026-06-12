@@ -67,6 +67,29 @@ Explore via API or the web UI at `http://localhost:3000`:
 Configured header values (e.g. `authorization`) are stored for polling but always masked in API
 responses, logs, and alerts.
 
+### Monitoring MCP servers
+
+Register a remote MCP server (Streamable HTTP transport) with `"kind": "mcp"`:
+
+```sh
+curl -X POST http://localhost:4000/dependencies \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "docs-mcp",
+    "kind": "mcp",
+    "url": "https://mcp.example.com/mcp",
+    "headers": { "authorization": "Bearer ..." },
+    "pollIntervalSeconds": 300
+  }'
+```
+
+Each poll runs the `initialize → tools/list` lifecycle and captures the tool catalog. The first
+successful capture locks it as the baseline (catalogs are exact documents, so `baselineWindow`
+defaults to 1), and every later capture is diffed against it per the §8 MCP matrix: tool or
+parameter removals, parameter type changes, and parameters becoming required are BREAKING;
+parameters becoming nullable are WARNING; new tools, new optional parameters, and description
+changes are INFO.
+
 ### Alerting
 
 Alerts fire for drift at or above `ALERT_THRESHOLD` (default `WARNING`; INFO drift is recorded
@@ -98,6 +121,10 @@ curl -X PUT http://localhost:5050/__control/response \
 # 4. Within one poll the timeline shows BREAKING drift:
 #    required-field-removed at $.price, field-type-changed at $.id.
 ```
+
+The same works for MCP: `pnpm --filter @tremurex/mock-api start:mcp` serves a mock MCP server
+on port 5051 (register `http://host.docker.internal:5051/mcp` with `"kind": "mcp"`), and
+`PUT http://localhost:5051/__control/tools` mutates its tool catalog.
 
 ## Development
 
@@ -133,7 +160,12 @@ See `CLAUDE.md` for the full project spec, architecture, and severity semantics.
 ## Status
 
 **Phase 1 (polling REST drift detection) — complete**: multi-sample baselining, semantic
-diff + severity classification, BullMQ polling scheduler, webhook/Slack alerting, REST API,
-diff-view UI, and an end-to-end drift proof — all self-hosted via `docker compose up`.
+diff + severity classification, BullMQ polling scheduler, webhook/Slack alerting (with
+repeat-drift dedup), REST API, diff-view UI, and an end-to-end drift proof — all self-hosted
+via `docker compose up`.
 
-Next phases (see `CLAUDE.md` §3): MCP server monitoring, passive proxy capture, CI integration.
+**Phase 2 (MCP server monitoring) — complete**: `initialize → tools/list` capture over
+Streamable HTTP, exact-catalog baselining, and tool-catalog drift classified per the §8 MCP
+severity matrix, flowing through the same pipeline, dedup, alerting, and UI.
+
+Next phases (see `CLAUDE.md` §3): passive proxy capture, CI integration.

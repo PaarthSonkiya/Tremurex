@@ -10,6 +10,7 @@ import { createDb } from '../db/client.js';
 import type { Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { alerts, baselines, dependencies, diffs, samples } from '../db/schema.js';
+import type { ToolCatalog } from '../mcp/catalog-diff.js';
 import { createPipeline } from './pipeline.js';
 import type { DriftAlert } from './pipeline.js';
 import type { SchemaInference } from '../schema-engine/client.js';
@@ -211,5 +212,138 @@ describe('poll pipeline end-to-end against Postgres', () => {
       reason: 'disabled',
     });
     expect(await db.select().from(samples)).toHaveLength(0);
+  });
+});
+
+describe('MCP dependencies (Phase 2): catalog drift through the same pipeline', () => {
+  async function setupMcp() {
+    const rows = await db
+      .insert(dependencies)
+      .values({
+        name: 'docs-mcp',
+        kind: 'mcp',
+        url: 'http://mcp.test/mcp',
+        baselineWindow: 1,
+        alertThreshold: 'WARNING',
+      })
+      .returning();
+    const dep = rows[0];
+    if (!dep) throw new Error('insert failed');
+
+    let catalog: ToolCatalog = {
+      tools: [
+        {
+          name: 'search_docs',
+          description: 'Search the docs',
+          inputSchema: {
+            type: 'object',
+            properties: { query: { type: 'string' }, limit: { type: 'integer' } },
+            required: ['query'],
+          },
+        },
+      ],
+    };
+    const sentAlerts: DriftAlert[] = [];
+    const pipeline = createPipeline({
+      db,
+      inference: {
+        infer: () => Promise.reject(new Error('schema-engine must not be called for MCP')),
+      },
+      fetchBody: () => Promise.reject(new Error('REST fetch must not be called for MCP')),
+      fetchCatalog: () => Promise.resolve(catalog),
+      dispatchAlert: (alert) => {
+        sentAlerts.push(alert);
+        return Promise.resolve();
+      },
+    });
+    return {
+      dep,
+      pipeline,
+      sentAlerts,
+      setCatalog: (c: ToolCatalog): void => {
+        catalog = c;
+      },
+    };
+  }
+
+  it('locks the exact catalog as baseline on the first capture (window 1)', async () => {
+    const { dep, pipeline } = await setupMcp();
+    expect(await pipeline.processPoll(dep.id)).toMatchObject({
+      status: 'ok',
+      outcome: { phase: 'baseline-locked', sampleCount: 1 },
+    });
+    const stored = await db.select().from(baselines);
+    expect((stored[0]?.schema as unknown as ToolCatalog).tools[0]?.name).toBe('search_docs');
+  });
+
+  it('classifies catalog drift per the §8 MCP matrix and alerts (with dedup)', async () => {
+    const { dep, pipeline, sentAlerts, setCatalog } = await setupMcp();
+    await pipeline.processPoll(dep.id); // locks baseline
+
+    // Unchanged catalog: silent.
+    expect(await pipeline.processPoll(dep.id)).toMatchObject({
+      outcome: { phase: 'monitoring', drift: null },
+    });
+
+    // The server renames `query` → `q` and drops `limit`.
+    setCatalog({
+      tools: [
+        {
+          name: 'search_docs',
+          description: 'Search the docs',
+          inputSchema: {
+            type: 'object',
+            properties: { q: { type: 'string' } },
+            required: ['q'],
+          },
+        },
+      ],
+    });
+    expect(await pipeline.processPoll(dep.id)).toMatchObject({ alerted: true });
+    expect(sentAlerts).toHaveLength(1);
+    expect(sentAlerts[0]?.severity).toBe('BREAKING');
+    const rules = sentAlerts[0]?.diffRow.entries.map((e) => `${e.path}:${e.rule}`);
+    expect(rules).toEqual([
+      '$.tools.search_docs.limit:tool-parameter-removed',
+      '$.tools.search_docs.q:required-parameter-added',
+      '$.tools.search_docs.query:tool-parameter-removed',
+    ]);
+
+    // Persisting catalog drift is suppressed like REST drift.
+    expect(await pipeline.processPoll(dep.id)).toMatchObject({
+      alerted: false,
+      outcome: { drift: { repeat: true } },
+    });
+    expect(sentAlerts).toHaveLength(1);
+  });
+
+  it('a new tool is INFO: recorded, not alerted at WARNING threshold', async () => {
+    const { dep, pipeline, sentAlerts, setCatalog } = await setupMcp();
+    await pipeline.processPoll(dep.id);
+
+    setCatalog({
+      tools: [
+        {
+          name: 'get_page',
+          inputSchema: { type: 'object', properties: { slug: { type: 'string' } } },
+        },
+        {
+          name: 'search_docs',
+          description: 'Search the docs',
+          inputSchema: {
+            type: 'object',
+            properties: { query: { type: 'string' }, limit: { type: 'integer' } },
+            required: ['query'],
+          },
+        },
+      ],
+    });
+    expect(await pipeline.processPoll(dep.id)).toMatchObject({
+      alerted: false,
+      outcome: { drift: { severity: 'INFO' } },
+    });
+    expect(sentAlerts).toHaveLength(0);
+    const stored = await db.select().from(diffs);
+    expect(stored[0]?.entries[0]?.rule).toBe('tool-added');
   });
 });

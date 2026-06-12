@@ -172,6 +172,10 @@ body {
   color: var(--amber);
 }
 
+.badge.kind {
+  color: var(--info);
+}
+
 .badge.resolved {
   color: var(--ink-dim);
   border-style: dashed;

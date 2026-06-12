@@ -19,11 +19,14 @@ export interface ApiDeps {
 
 const RegisterDependency = z.object({
   name: z.string().min(1).max(200),
+  /** 'rest' polls a JSON endpoint; 'mcp' runs initialize → tools/list. */
+  kind: z.enum(['rest', 'mcp']).default('rest'),
   url: z.url(),
   method: z.enum(['GET', 'POST']).default('GET'),
   headers: z.record(z.string(), z.string()).default({}),
   pollIntervalSeconds: z.number().int().min(5).max(86_400).default(300),
-  baselineWindow: z.number().int().min(1).max(100).default(5),
+  /** Defaults per kind: 5 for rest (multi-sample merge), 1 for mcp (exact catalog). */
+  baselineWindow: z.number().int().min(1).max(100).optional(),
   alertThreshold: z.enum(['BREAKING', 'WARNING', 'INFO']).default('WARNING'),
 });
 
@@ -43,7 +46,11 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
         .status(400)
         .send({ error: 'invalid-body', issues: z.treeifyError(parsed.error) });
     }
-    const inserted = await db.insert(dependencies).values(parsed.data).returning();
+    const values = {
+      ...parsed.data,
+      baselineWindow: parsed.data.baselineWindow ?? (parsed.data.kind === 'mcp' ? 1 : 5),
+    };
+    const inserted = await db.insert(dependencies).values(values).returning();
     const dependency = inserted[0];
     if (!dependency) {
       return reply.status(500).send({ error: 'insert-failed' });

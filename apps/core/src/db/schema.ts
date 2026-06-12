@@ -11,7 +11,7 @@ import type { Diff, JsonSchema, JsonValue, Severity } from '@tremurex/shared';
 export const dependencies = pgTable('dependencies', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
-  kind: text('kind', { enum: ['rest'] })
+  kind: text('kind', { enum: ['rest', 'mcp'] })
     .notNull()
     .default('rest'),
   url: text('url').notNull(),

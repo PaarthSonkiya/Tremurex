@@ -5,6 +5,7 @@
 import { eq } from 'drizzle-orm';
 import { meetsThreshold } from '@tremurex/shared';
 import type { Severity } from '@tremurex/shared';
+import type { JsonValue } from '@tremurex/shared';
 import { createBaselineService } from '../baseline/baseline-service.js';
 import type { CaptureOutcome } from '../baseline/baseline-service.js';
 import { pollEndpoint } from '../capture/poll.js';
@@ -13,6 +14,8 @@ import type { Db } from '../db/client.js';
 import { dependencies } from '../db/schema.js';
 import type { DependencyRow, DiffRow } from '../db/schema.js';
 import { diffSchemas } from '../diff/diff-engine.js';
+import { fetchToolCatalog } from '../mcp/client.js';
+import type { FetchCatalog } from '../mcp/client.js';
 import type { SchemaInference } from '../schema-engine/client.js';
 
 export interface DriftAlert {
@@ -36,9 +39,11 @@ export function createPipeline(opts: {
   db: Db;
   inference: SchemaInference;
   fetchBody?: FetchBody;
+  fetchCatalog?: FetchCatalog;
   dispatchAlert?: AlertDispatcher;
 }): Pipeline {
   const fetchBody = opts.fetchBody ?? pollEndpoint;
+  const fetchCatalog = opts.fetchCatalog ?? fetchToolCatalog;
   const dispatchAlert = opts.dispatchAlert ?? ((): Promise<void> => Promise.resolve());
   const baselineService = createBaselineService(opts.db, opts.inference, (baseline, capture) =>
     // Phase 1 hot path: current side is always a single-sample schema.
@@ -56,7 +61,12 @@ export function createPipeline(opts: {
       return { status: 'skipped', reason: 'disabled' };
     }
 
-    const body = await fetchBody(dependency); // already redacted (§7.2)
+    // REST bodies arrive already redacted (§7.2); MCP catalogs are schema
+    // metadata (shape, not values) and are captured canonically as-is.
+    const body =
+      dependency.kind === 'mcp'
+        ? ((await fetchCatalog(dependency)) as unknown as JsonValue)
+        : await fetchBody(dependency);
     const outcome = await baselineService.recordCapture(dependency.id, body);
 
     let alerted = false;

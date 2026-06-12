@@ -16,6 +16,7 @@ export interface DiffEntry {
 export interface Dependency {
   id: string;
   name: string;
+  kind: 'rest' | 'mcp';
   url: string;
   method: string;
   pollIntervalSeconds: number;

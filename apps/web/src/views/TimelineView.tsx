@@ -29,7 +29,8 @@ export function TimelineView({
           <div className="timeline-head">
             <h2>{data.dependency.name}</h2>
             <p className="url">
-              {data.dependency.method} {data.dependency.url}
+              {data.dependency.kind === 'mcp' ? 'MCP' : data.dependency.method}{' '}
+              {data.dependency.url}
             </p>
             <p className="microlabel">
               <span className={`badge ${data.status}`}>{data.status}</span>{' '}

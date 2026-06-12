@@ -75,6 +75,25 @@ describe('POST /dependencies', () => {
     expect(stored[0]?.headers.authorization).toBe('Bearer gh-secret');
   });
 
+  it('registers MCP dependencies with the exact-catalog default window of 1', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/dependencies',
+      payload: { name: 'docs-mcp', kind: 'mcp', url: 'http://mcp.example.test/mcp' },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json<{ kind: string; baselineWindow: number }>();
+    expect(body.kind).toBe('mcp');
+    expect(body.baselineWindow).toBe(1);
+    // REST keeps its multi-sample default of 5.
+    const rest = await app.inject({
+      method: 'POST',
+      url: '/dependencies',
+      payload: { name: 'api', url: 'https://api.example.test/x' },
+    });
+    expect(rest.json<{ baselineWindow: number }>().baselineWindow).toBe(5);
+  });
+
   it('rejects invalid bodies with 400 and no side effects', async () => {
     const res = await app.inject({
       method: 'POST',

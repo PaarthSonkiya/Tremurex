@@ -30,13 +30,42 @@ export const REST_RULES = {
 
 export type RestRuleId = keyof typeof REST_RULES;
 
+/**
+ * The MCP tool-catalog severity matrix from CLAUDE.md §8, verbatim, plus one
+ * user-approved extension. Caller-of-tool semantics: anything that makes an
+ * existing call invalid breaks; loosening (required → optional parameter) is
+ * safe and intentionally has no rule.
+ */
+export const MCP_RULES = {
+  'tool-removed': Severity.Breaking,
+  /** Covers "removed or renamed" — a rename surfaces as the old name vanishing. */
+  'tool-parameter-removed': Severity.Breaking,
+  'parameter-type-changed': Severity.Breaking,
+  'optional-parameter-became-required': Severity.Breaking,
+  // User-approved extension (2026-06-12), not in the §8 matrix: a brand-new
+  // parameter that is required from the start — existing callers won't be
+  // passing it, same risk class as optional-became-required.
+  'required-parameter-added': Severity.Breaking,
+  'parameter-became-nullable': Severity.Warning,
+  'tool-added': Severity.Info,
+  'optional-parameter-added': Severity.Info,
+  /** Tool or parameter description changed. */
+  'description-changed': Severity.Info,
+} as const;
+
+export type McpRuleId = keyof typeof MCP_RULES;
+
+const ALL_RULES: Record<RuleId, Severity> = { ...REST_RULES, ...MCP_RULES };
+
+export type RuleId = RestRuleId | McpRuleId;
+
 /** One typed, located, severity-classified change (§8). */
 export interface DiffEntry {
   /** JSONPath-style location of the change, e.g. `$.user.email`. */
   path: string;
   /** The rule that fired. */
-  rule: RestRuleId;
-  /** Always REST_RULES[rule]; stored for direct querying/display. */
+  rule: RuleId;
+  /** Always the rule table's severity; stored for direct querying/display. */
   severity: Severity;
   /** Schema fragment before the change; absent for additions. */
   before?: JsonValue;
@@ -50,18 +79,18 @@ export interface Diff {
 }
 
 /**
- * Build a DiffEntry from a rule and a path. Severity comes from REST_RULES,
- * so an entry can never carry a severity its rule disagrees with.
+ * Build a DiffEntry from a rule and a path. Severity comes from the rule
+ * tables, so an entry can never carry a severity its rule disagrees with.
  */
 export function createDiffEntry(
-  rule: RestRuleId,
+  rule: RuleId,
   segments: readonly JsonPathSegment[],
   fragments: { before?: JsonValue; after?: JsonValue } = {},
 ): DiffEntry {
   return {
     path: formatJsonPath(segments),
     rule,
-    severity: REST_RULES[rule],
+    severity: ALL_RULES[rule],
     ...('before' in fragments ? { before: fragments.before } : {}),
     ...('after' in fragments ? { after: fragments.after } : {}),
   };

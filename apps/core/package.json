@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@slack/web-api": "^7.17.0",
     "@tremurex/shared": "workspace:*",
     "bullmq": "^5.78.0",
@@ -21,6 +22,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@tremurex/mock-api": "workspace:*",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.22.4"

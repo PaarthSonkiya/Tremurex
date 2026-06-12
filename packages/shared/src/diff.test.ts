@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MCP_RULES,
   REST_RULES,
   countBySeverity,
   createDiffEntry,
@@ -51,6 +52,45 @@ describe('REST_RULES — one assertion per row of the CLAUDE.md §8 REST severit
 
   it('covers the 10 REST matrix rows plus the approved extension', () => {
     expect(Object.keys(REST_RULES)).toHaveLength(11);
+  });
+});
+
+describe('MCP_RULES — one assertion per row of the CLAUDE.md §8 MCP severity matrix', () => {
+  it('tool removed → BREAKING', () => {
+    expect(MCP_RULES['tool-removed']).toBe(Severity.Breaking);
+  });
+  it('tool parameter removed (covers renamed: old name vanishes) → BREAKING', () => {
+    expect(MCP_RULES['tool-parameter-removed']).toBe(Severity.Breaking);
+  });
+  it('parameter type changed → BREAKING', () => {
+    expect(MCP_RULES['parameter-type-changed']).toBe(Severity.Breaking);
+  });
+  it('optional parameter became required → BREAKING', () => {
+    expect(MCP_RULES['optional-parameter-became-required']).toBe(Severity.Breaking);
+  });
+  it('parameter became nullable → WARNING', () => {
+    expect(MCP_RULES['parameter-became-nullable']).toBe(Severity.Warning);
+  });
+  it('new tool added → INFO', () => {
+    expect(MCP_RULES['tool-added']).toBe(Severity.Info);
+  });
+  it('new optional parameter added → INFO', () => {
+    expect(MCP_RULES['optional-parameter-added']).toBe(Severity.Info);
+  });
+  it('tool/param description changed → INFO', () => {
+    expect(MCP_RULES['description-changed']).toBe(Severity.Info);
+  });
+
+  it('new REQUIRED parameter added → BREAKING (user-approved extension, 2026-06-12)', () => {
+    // §8 matrix gap: a parameter that is required from the start breaks
+    // existing callers — same risk class as optional-became-required.
+    expect(MCP_RULES['required-parameter-added']).toBe(Severity.Breaking);
+  });
+
+  it('covers the 8 MCP matrix rows plus the approved extension, disjoint from REST ids', () => {
+    expect(Object.keys(MCP_RULES)).toHaveLength(9);
+    const overlap = Object.keys(MCP_RULES).filter((id) => id in REST_RULES);
+    expect(overlap).toEqual([]);
   });
 });
 

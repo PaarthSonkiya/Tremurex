@@ -35,10 +35,11 @@ export function DependencyList({ onSelect }: { onSelect: (depId: string) => void
               <span className="name">{dep.name}</span>
               <br />
               <span className="url">
-                {dep.method} {dep.url}
+                {dep.kind === 'mcp' ? 'MCP' : dep.method} {dep.url}
               </span>
             </span>
             <span className="meta">
+              {dep.kind === 'mcp' && <span className="badge kind">mcp</span>}
               <span>every {dep.pollIntervalSeconds}s</span>
               <span className={`badge ${dep.status}`}>{dep.status}</span>
             </span>

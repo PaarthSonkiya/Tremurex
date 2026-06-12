@@ -3,7 +3,9 @@ import { diffSeverity, hasDrift, sameDiffEntries } from '@tremurex/shared';
 import type { Diff, JsonSchema, JsonValue, Severity } from '@tremurex/shared';
 import type { Db } from '../db/client.js';
 import { baselines, dependencies, diffs, samples } from '../db/schema.js';
-import type { BaselineRow, DiffRow } from '../db/schema.js';
+import type { BaselineRow, DependencyRow, DiffRow } from '../db/schema.js';
+import { diffCatalogs } from '../mcp/catalog-diff.js';
+import type { ToolCatalog } from '../mcp/catalog-diff.js';
 import type { SchemaInference } from '../schema-engine/client.js';
 
 /**
@@ -21,6 +23,12 @@ import type { SchemaInference } from '../schema-engine/client.js';
  * A capture repeating that exact drift bumps lastSeenAt — no new row, no new
  * alert. A clean or differently-drifted capture resolves the open diff;
  * drift (re)appearing after that is fresh and alertable again.
+ *
+ * MCP dependencies (Phase 2, user-approved 2026-06-12): a capture is the
+ * canonical tool catalog, an exact document — no statistical merge. The
+ * baseline IS the latest sample's catalog (default window 1; a larger window
+ * just confirms the latest), and drift comes from the §8 MCP catalog differ.
+ * The same dedup path applies unchanged.
  */
 
 export type DiffSchemas = (baseline: JsonSchema, capture: JsonSchema) => Diff;
@@ -63,16 +71,13 @@ export function createBaselineService(
 
     const active = await getActiveBaseline(dependencyId);
     if (!active) {
-      return accumulate(dependencyId, dependency.baselineWindow, body);
+      return accumulate(dependency, body);
     }
-    return monitor(active, body);
+    return monitor(dependency.kind, active, body);
   }
 
-  async function accumulate(
-    dependencyId: string,
-    window: number,
-    body: JsonValue,
-  ): Promise<CaptureOutcome> {
+  async function accumulate(dependency: DependencyRow, body: JsonValue): Promise<CaptureOutcome> {
+    const { id: dependencyId, baselineWindow: window } = dependency;
     await db.insert(samples).values({ dependencyId, body });
     const collected = await db
       .select()
@@ -84,9 +89,17 @@ export function createBaselineService(
       return { phase: 'baselining', samplesCollected: collected.length, window };
     }
 
-    // Window complete: merge ALL accumulated samples in one shot so genson
-    // marks conditionally-present fields optional (§8 step 2), then lock.
-    const merged = await inference.infer(collected.map((s) => s.body));
+    // Window complete. REST: merge ALL accumulated samples in one shot so
+    // genson marks conditionally-present fields optional (§8 step 2). MCP:
+    // the baseline IS the latest catalog — an exact document, no merge.
+    const last = collected[collected.length - 1];
+    if (!last) {
+      throw new Error('Baselining window completed with no samples');
+    }
+    const merged =
+      dependency.kind === 'mcp'
+        ? (last.body as JsonSchema)
+        : await inference.infer(collected.map((s) => s.body));
     const inserted = await db
       .insert(baselines)
       .values({ dependencyId, schema: merged, sampleCount: collected.length, status: 'active' })
@@ -113,9 +126,18 @@ export function createBaselineService(
     await db.update(diffs).set({ resolvedAt: new Date() }).where(eq(diffs.id, diffId));
   }
 
-  async function monitor(baseline: BaselineRow, body: JsonValue): Promise<CaptureOutcome> {
-    const captureSchema = await inference.infer([body]);
-    const diff = diffSchemas(baseline.schema, captureSchema);
+  async function monitor(
+    kind: DependencyRow['kind'],
+    baseline: BaselineRow,
+    body: JsonValue,
+  ): Promise<CaptureOutcome> {
+    // For MCP the capture already IS the canonical catalog; for REST the
+    // capture's schema is inferred from the single body.
+    const captureSchema = kind === 'mcp' ? (body as JsonSchema) : await inference.infer([body]);
+    const diff =
+      kind === 'mcp'
+        ? diffCatalogs(baseline.schema as unknown as ToolCatalog, body as unknown as ToolCatalog)
+        : diffSchemas(baseline.schema, captureSchema);
     const open = await getOpenDiff(baseline.id);
 
     if (!hasDrift(diff)) {
