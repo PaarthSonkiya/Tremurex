@@ -4,6 +4,13 @@
  */
 export type JsonPathSegment = string | number;
 
+/**
+ * Segment meaning "every element of this array" — diff entries about an
+ * array's items schema render as `$.field[*]`. (A literal object key "*"
+ * would collide; accepted tradeoff, JSON APIs don't use it in practice.)
+ */
+export const WILDCARD = '*';
+
 const PLAIN_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
@@ -16,6 +23,8 @@ export function formatJsonPath(segments: readonly JsonPathSegment[]): string {
   for (const segment of segments) {
     if (typeof segment === 'number') {
       out += `[${String(segment)}]`;
+    } else if (segment === WILDCARD) {
+      out += '[*]';
     } else if (PLAIN_IDENTIFIER.test(segment)) {
       out += `.${segment}`;
     } else {

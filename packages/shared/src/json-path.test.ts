@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatJsonPath } from './json-path.js';
+import { WILDCARD, formatJsonPath } from './json-path.js';
 
 describe('formatJsonPath', () => {
   it('formats the document root as $', () => {
@@ -22,5 +22,10 @@ describe('formatJsonPath', () => {
 
   it('quotes numeric-looking string keys to distinguish them from indices', () => {
     expect(formatJsonPath(['123'])).toBe('$["123"]');
+  });
+
+  it('renders the array-element wildcard segment as [*]', () => {
+    expect(formatJsonPath(['tags', WILDCARD])).toBe('$.tags[*]');
+    expect(formatJsonPath(['items', WILDCARD, 'id'])).toBe('$.items[*].id');
   });
 });
