@@ -1,0 +1,303 @@
+/* Tremurex — seismic-instrument aesthetic.
+   System monospace only: no external font loading (§7 privacy spirit). */
+
+:root {
+  --bg: #16130f;
+  --panel: #1e1a15;
+  --panel-edge: #2c261e;
+  --ink: #d8d2c7;
+  --ink-dim: #8a8174;
+  --amber: #f0a830;
+  --amber-dim: #8a6420;
+  --breaking: #e5484d;
+  --warning: #f0a830;
+  --info: #3fb1c8;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+#root {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+}
+
+/* ---- chrome ---- */
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--panel-edge);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.masthead .tagline {
+  color: var(--ink-dim);
+  font-size: 0.78rem;
+}
+
+.microlabel {
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.backlink {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-bottom: 1rem;
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--amber);
+  cursor: pointer;
+}
+
+.backlink:hover {
+  text-decoration: underline;
+}
+
+.status-note {
+  color: var(--ink-dim);
+  padding: 2rem 0;
+}
+
+.status-note.error {
+  color: var(--breaking);
+}
+
+/* ---- panels & rows ---- */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border: none;
+  border-bottom: 1px solid var(--panel-edge);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row:hover {
+  background: rgba(240, 168, 48, 0.06);
+}
+
+.row .name {
+  font-weight: 600;
+}
+
+.row .url {
+  color: var(--ink-dim);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.row .meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+}
+
+/* ---- badges ---- */
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.badge.BREAKING {
+  color: var(--breaking);
+}
+
+.badge.WARNING {
+  color: var(--warning);
+}
+
+.badge.INFO {
+  color: var(--info);
+}
+
+.badge.baselining {
+  color: var(--ink-dim);
+}
+
+.badge.monitoring {
+  color: var(--amber);
+}
+
+/* ---- timeline ---- */
+
+.timeline-head {
+  margin-bottom: 1rem;
+}
+
+.timeline-head h2 {
+  margin: 0 0 0.15rem;
+  font-size: 1rem;
+}
+
+.event {
+  border-left: 3px solid var(--panel-edge);
+}
+
+.event.BREAKING {
+  border-left-color: var(--breaking);
+}
+
+.event.WARNING {
+  border-left-color: var(--warning);
+}
+
+.event.INFO {
+  border-left-color: var(--info);
+}
+
+.event.locked {
+  border-left-color: var(--amber-dim);
+  cursor: default;
+}
+
+.event.locked:hover {
+  background: none;
+}
+
+.event .when {
+  color: var(--ink-dim);
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+
+/* ---- diff view ---- */
+
+.diff-entry {
+  border-left: 3px solid var(--panel-edge);
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--panel-edge);
+}
+
+.diff-entry:last-child {
+  border-bottom: none;
+}
+
+.diff-entry.BREAKING {
+  border-left-color: var(--breaking);
+}
+
+.diff-entry.WARNING {
+  border-left-color: var(--warning);
+}
+
+.diff-entry.INFO {
+  border-left-color: var(--info);
+}
+
+.diff-entry .head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.3rem;
+}
+
+.diff-entry .path {
+  color: var(--amber);
+  font-size: 0.85rem;
+}
+
+.diff-entry .rule {
+  color: var(--ink-dim);
+  font-size: 0.72rem;
+}
+
+.fragments {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+
+.fragment .microlabel {
+  margin-bottom: 0.2rem;
+}
+
+pre.code {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--panel-edge);
+  border-radius: 3px;
+  font-size: 0.75rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+details.schemas {
+  margin-top: 1.25rem;
+}
+
+details.schemas summary {
+  cursor: pointer;
+  color: var(--ink-dim);
+  font-size: 0.78rem;
+}
+
+.schema-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 0.6rem;
+}
+
+@media (max-width: 640px) {
+  .fragments,
+  .schema-pair {
+    grid-template-columns: 1fr;
+  }
+}

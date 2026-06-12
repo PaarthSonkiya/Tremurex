@@ -19,7 +19,6 @@ import {
 } from './scheduler/scheduler.js';
 
 const config = loadConfig();
-const app = buildApp();
 
 const { db, pool } = createDb(config.DATABASE_URL);
 await runMigrations(db);
@@ -44,6 +43,10 @@ const pipeline = createPipeline({
 });
 
 const queue = createPollingQueue(config.REDIS_URL);
+const app = await buildApp({
+  db,
+  syncSchedule: (dependency) => syncDependencySchedule(queue, dependency),
+});
 const worker = createPollingWorker(config.REDIS_URL, async (dependencyId) => {
   const result = await pipeline.processPoll(dependencyId);
   app.log.info({ dependencyId, result: result.status }, 'poll processed');
