@@ -1,0 +1,14 @@
+#!/bin/sh
+# Pre-commit: lint + tests must pass (CLAUDE.md §5 tooling).
+set -e
+
+echo "pre-commit: lint"
+pnpm lint
+
+echo "pre-commit: TS tests"
+pnpm test
+
+if [ -d services/schema-engine ] && [ -f services/schema-engine/pyproject.toml ]; then
+  echo "pre-commit: schema-engine ruff + pytest"
+  (cd services/schema-engine && uv run ruff check . && uv run pytest -q)
+fi

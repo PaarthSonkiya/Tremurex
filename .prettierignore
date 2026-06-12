@@ -1,0 +1,8 @@
+CLAUDE.md
+node_modules
+dist
+coverage
+pnpm-lock.yaml
+services/schema-engine
+services/proxy
+.venv

@@ -1,0 +1,22 @@
+# Node
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Env & local
+.env
+.env.local
+*.local
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
