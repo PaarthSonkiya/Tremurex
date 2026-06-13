@@ -67,6 +67,20 @@ Explore via API or the web UI at `http://localhost:3000`:
 Configured header values (e.g. `authorization`) are stored for polling but always masked in API
 responses, logs, and alerts.
 
+### Managing dependencies
+
+The web UI is a full control surface — register, edit, and operate dependencies without touching
+curl — and every action has a REST equivalent:
+
+- `PATCH /dependencies/:id` — edit name, URL, headers, cadence, window, alert threshold, or
+  pause/resume (`enabled`). The schedule reconciles automatically.
+- `DELETE /dependencies/:id` — stop monitoring and remove all of its history.
+- `POST /dependencies/:id/poll` — poll once, right now (poll-mode only).
+- `POST /dependencies/:id/rebaseline` — when a dependency has _legitimately_ changed shape,
+  discard its baseline and relearn from the next captures.
+- `POST /diffs/:id/resolve` — manually mark a drift resolved during triage.
+- `GET /dependencies/:id/alerts` — the alert delivery history for a dependency.
+
 ### Monitoring MCP servers
 
 Register a remote MCP server (Streamable HTTP transport) with `"kind": "mcp"`:
@@ -240,4 +254,10 @@ same baseline/diff/alert pipeline. Opt-in via the `proxy` compose profile.
 **Phase 4 (CI integration) — complete**: the `tremurex` CLI fails a build when a monitored
 dependency has drift at or above a configurable severity, with an optional live `--refresh`.
 
-All four roadmap phases are implemented, tested, and demoable under `docker compose up`.
+All four roadmap phases are implemented, tested, and demoable under `docker compose up`, with
+full dependency management (edit, delete, re-baseline, resolve, alert history) from both the API
+and the web UI.
+
+## License
+
+[MIT](LICENSE).

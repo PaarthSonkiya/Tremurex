@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tremurex
+          POSTGRES_PASSWORD: tremurex
+          POSTGRES_DB: tremurex
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tremurex -d tremurex"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://tremurex:tremurex@localhost:5432/tremurex
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Sync Python services
+        run: |
+          (cd services/schema-engine && uv sync)
+          (cd services/proxy && uv sync)
+
+      - name: Lint (ESLint + Prettier)
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test (TypeScript)
+        run: pnpm test
+
+      - name: Lint + test (schema-engine)
+        run: cd services/schema-engine && uv run ruff check . && uv run pytest -q
+
+      - name: Lint + test (proxy)
+        run: cd services/proxy && uv run ruff check . && uv run pytest -q
