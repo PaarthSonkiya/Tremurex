@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { fetchDiff } from '../api.js';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchDiff, resolveDiff } from '../api.js';
 import { formatInstant } from '../format.js';
 
 function Fragment({ label, value }: { label: string; value: unknown }) {
@@ -13,9 +13,22 @@ function Fragment({ label, value }: { label: string; value: unknown }) {
 }
 
 export function DiffView({ diffId, onBack }: { diffId: string; onBack: () => void }) {
+  const queryClient = useQueryClient();
   const { data, isPending, error } = useQuery({
     queryKey: ['diff', diffId],
     queryFn: () => fetchDiff(diffId),
+  });
+  const resolve = useMutation({
+    mutationFn: () => resolveDiff(diffId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['diff', diffId] }),
+        queryClient.invalidateQueries({ queryKey: ['dependencies'] }),
+        ...(data?.dependency
+          ? [queryClient.invalidateQueries({ queryKey: ['timeline', data.dependency.id] })]
+          : []),
+      ]);
+    },
   });
 
   return (
@@ -43,6 +56,23 @@ export function DiffView({ diffId, onBack }: { diffId: string; onBack: () => voi
                 <> · still drifting</>
               )}
             </p>
+            {data.resolvedAt === null && (
+              <div className="actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={resolve.isPending}
+                  onClick={() => {
+                    resolve.mutate();
+                  }}
+                >
+                  {resolve.isPending ? 'Resolving…' : 'Mark resolved'}
+                </button>
+                {resolve.error && (
+                  <span className="status-note error inline">{resolve.error.message}</span>
+                )}
+              </div>
+            )}
           </div>
           <div className="panel">
             {data.entries.map((entry, i) => (

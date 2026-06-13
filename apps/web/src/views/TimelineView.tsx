@@ -1,6 +1,10 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchTimeline } from '../api.js';
 import { formatInstant } from '../format.js';
+import { AlertHistory } from './AlertHistory.js';
+import { DependencyActions } from './DependencyActions.js';
+import { EditForm } from './EditForm.js';
 
 export function TimelineView({
   depId,
@@ -11,6 +15,7 @@ export function TimelineView({
   onBack: () => void;
   onSelectDiff: (diffId: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
   const { data, isPending, error } = useQuery({
     queryKey: ['timeline', depId],
     queryFn: () => fetchTimeline(depId),
@@ -34,10 +39,27 @@ export function TimelineView({
             </p>
             <p className="microlabel">
               <span className={`badge ${data.status}`}>{data.status}</span>{' '}
+              {!data.dependency.enabled && <span className="badge paused">paused</span>}{' '}
               {data.status === 'baselining' &&
                 `${String(data.samplesCollected)}/${String(data.dependency.baselineWindow)} samples collected`}
             </p>
+            <DependencyActions
+              dependency={data.dependency}
+              onEdit={() => {
+                setEditing((v) => !v);
+              }}
+              onDeleted={onBack}
+            />
           </div>
+
+          {editing && (
+            <EditForm
+              dependency={data.dependency}
+              onClose={() => {
+                setEditing(false);
+              }}
+            />
+          )}
           {data.events.length === 0 ? (
             <p className="status-note">No events yet — still collecting baseline samples.</p>
           ) : (
@@ -77,6 +99,8 @@ export function TimelineView({
               )}
             </div>
           )}
+
+          <AlertHistory depId={depId} />
         </>
       )}
     </section>

@@ -176,6 +176,11 @@ body {
   color: var(--info);
 }
 
+.badge.paused {
+  color: var(--ink-dim);
+  border-style: dashed;
+}
+
 .badge.resolved {
   color: var(--ink-dim);
   border-style: dashed;
@@ -313,4 +318,126 @@ details.schemas summary {
   .schema-pair {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---- controls: buttons, forms, actions (Phase 5 management) ---- */
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+button.primary,
+button.ghost {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 3px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+
+button.primary {
+  background: var(--amber);
+  color: #1a1610;
+  border: 1px solid var(--amber);
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #ffc04d;
+}
+
+button.ghost {
+  background: none;
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+}
+
+button.ghost:hover:not(:disabled) {
+  border-color: var(--amber-dim);
+  color: var(--amber);
+}
+
+button.ghost.danger:hover:not(:disabled) {
+  border-color: var(--breaking);
+  color: var(--breaking);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.status-note.inline {
+  padding: 0;
+  font-size: 0.74rem;
+}
+
+/* ---- forms ---- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  margin: 0.75rem 0 1.25rem;
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1 1 auto;
+}
+
+.form-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.form input,
+.form select {
+  font: inherit;
+  font-size: 0.85rem;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+  border-radius: 3px;
+  padding: 0.4rem 0.5rem;
+}
+
+.form input:focus,
+.form select:focus {
+  outline: none;
+  border-color: var(--amber-dim);
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.alert-history {
+  margin-top: 1.5rem;
+}
+
+.row.alert {
+  cursor: default;
+}
+
+.row.alert:hover {
+  background: none;
 }
