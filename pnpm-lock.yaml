@@ -33,6 +33,8 @@ importers:
         specifier: ^4.1.8
         version: 4.1.8(@types/node@25.9.3)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(tsx@4.22.4))
 
+  apps/cli: {}
+
   apps/core:
     dependencies:
       '@fastify/cors':
@@ -108,6 +110,9 @@ importers:
 
   tests/e2e:
     dependencies:
+      '@tremurex/cli':
+        specifier: workspace:*
+        version: link:../../apps/cli
       '@tremurex/mock-api':
         specifier: workspace:*
         version: link:../mock-api

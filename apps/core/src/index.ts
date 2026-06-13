@@ -47,6 +47,7 @@ const app = await buildApp({
   db,
   syncSchedule: (dependency) => syncDependencySchedule(queue, dependency),
   processCapture: (dependencyId, body) => pipeline.processCapture(dependencyId, body),
+  pollNow: (dependencyId) => pipeline.processPoll(dependencyId),
 });
 const worker = createPollingWorker(config.REDIS_URL, async (dependencyId) => {
   const result = await pipeline.processPoll(dependencyId);

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import pg from 'pg';
+import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { createDiffEntry } from '@tremurex/shared';
 import type { JsonValue } from '@tremurex/shared';
@@ -127,6 +128,109 @@ describe('GET /dependencies', () => {
     res = await app.inject({ method: 'GET', url: '/dependencies' });
     list = res.json();
     expect(list[0]?.status).toBe('monitoring');
+  });
+
+  it('reports currentDrift as the open unresolved diff (Phase 4 CI gate input)', async () => {
+    const [dep] = await db
+      .insert(dependencies)
+      .values({ name: 'a', url: 'https://a.test' })
+      .returning();
+    if (!dep) throw new Error('insert failed');
+    const [baseline] = await db
+      .insert(baselines)
+      .values({ dependencyId: dep.id, schema: { type: 'object' }, sampleCount: 5 })
+      .returning();
+    if (!baseline) throw new Error('insert failed');
+
+    // No drift yet.
+    let list = (await app.inject({ method: 'GET', url: '/dependencies' })).json<
+      { currentDrift: { severity: string } | null }[]
+    >();
+    expect(list[0]?.currentDrift).toBeNull();
+
+    // An unresolved BREAKING diff surfaces as currentDrift.
+    const [open] = await db
+      .insert(diffs)
+      .values({
+        dependencyId: dep.id,
+        baselineId: baseline.id,
+        entries: [
+          createDiffEntry('required-field-removed', ['id'], { before: { type: 'integer' } }),
+        ],
+        severity: 'BREAKING',
+        capturedSchema: { type: 'object' },
+      })
+      .returning();
+    if (!open) throw new Error('insert failed');
+    list = (await app.inject({ method: 'GET', url: '/dependencies' })).json();
+    expect(list[0]?.currentDrift).toMatchObject({ severity: 'BREAKING' });
+
+    // Once resolved, currentDrift clears.
+    await db.update(diffs).set({ resolvedAt: new Date() }).where(eq(diffs.id, open.id));
+    list = (await app.inject({ method: 'GET', url: '/dependencies' })).json();
+    expect(list[0]?.currentDrift).toBeNull();
+  });
+});
+
+describe('POST /dependencies/:id/poll (Phase 4 check-now)', () => {
+  let pollApp: FastifyInstance;
+  let polled: string[] = [];
+
+  beforeAll(async () => {
+    pollApp = await buildApp({
+      db,
+      syncSchedule: () => Promise.resolve(),
+      pollNow: (id) => {
+        polled.push(id);
+        return Promise.resolve({
+          status: 'ok',
+          outcome: { phase: 'monitoring', drift: null },
+          alerted: false,
+        });
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await pollApp.close();
+  });
+
+  beforeEach(() => {
+    polled = [];
+  });
+
+  it('triggers a synchronous poll and returns the outcome', async () => {
+    const [dep] = await db
+      .insert(dependencies)
+      .values({ name: 'p', url: 'https://p.test' })
+      .returning();
+    if (!dep) throw new Error('insert failed');
+    const res = await pollApp.inject({ method: 'POST', url: `/dependencies/${dep.id}/poll` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ status: string; phase: string }>()).toMatchObject({
+      status: 'ok',
+      phase: 'monitoring',
+    });
+    expect(polled).toEqual([dep.id]);
+  });
+
+  it('refuses to poll a proxy-mode dependency with 409', async () => {
+    const [dep] = await db
+      .insert(dependencies)
+      .values({ name: 'px', captureMode: 'proxy', url: 'https://px.test/x' })
+      .returning();
+    if (!dep) throw new Error('insert failed');
+    const res = await pollApp.inject({ method: 'POST', url: `/dependencies/${dep.id}/poll` });
+    expect(res.statusCode).toBe(409);
+    expect(polled).toHaveLength(0);
+  });
+
+  it('404s for an unknown dependency', async () => {
+    const res = await pollApp.inject({
+      method: 'POST',
+      url: '/dependencies/00000000-0000-0000-0000-000000000000/poll',
+    });
+    expect(res.statusCode).toBe(404);
   });
 });
 

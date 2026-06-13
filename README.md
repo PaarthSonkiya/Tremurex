@@ -136,6 +136,34 @@ to the timeline but never pushed). Configure destinations in `.env` — both opt
 
 Every delivery attempt (sent or failed) is recorded in alert history.
 
+### Failing CI on drift
+
+The `tremurex` CLI turns drift into a build gate. It asks a running core which
+dependencies are currently drifted and exits non-zero when any sits at or above a
+threshold.
+
+```sh
+pnpm --filter @tremurex/cli build      # produces apps/cli/dist/cli.js
+
+# Fail the build only on BREAKING drift (the default); --refresh polls each
+# pollable dependency once first so the check reflects the live APIs right now.
+node apps/cli/dist/cli.js check --url http://localhost:4000 --refresh
+```
+
+Options: `--url` (or `TREMUREX_CORE_URL`), `--threshold BREAKING|WARNING|INFO`,
+`--refresh`, `--json`. Exit codes: **0** clean · **1** drift at/above threshold ·
+**2** usage/connection error.
+
+In GitHub Actions, run core (e.g. as a service or a prior `docker compose up -d`
+step) and then:
+
+```yaml
+- name: Check API dependencies for drift
+  run: node apps/cli/dist/cli.js check --refresh --threshold BREAKING
+  env:
+    TREMUREX_CORE_URL: http://localhost:4000
+```
+
 ### Manufacture drift in 2 minutes (demo)
 
 ```sh
@@ -184,11 +212,12 @@ Pre-commit hooks (lint + all tests) are installed automatically by `pnpm install
 ```
 apps/core              TS service: capture, baseline store, diff + severity, scheduler, API
 apps/web               React/Vite diff-view UI
+apps/cli               tremurex CLI: CI drift gate (Phase 4)
 services/schema-engine Python FastAPI + genson inference sidecar
 services/proxy         Python mitmproxy addon: passive capture → core /ingest (Phase 3)
 packages/shared        Shared TS domain types (schema model, Diff, Severity)
 tests/mock-api         Controllable mock REST + MCP servers for manufacturing drift
-tests/e2e              End-to-end drift proofs (REST poll, MCP, and proxy capture)
+tests/e2e              End-to-end drift proofs (REST poll, MCP, proxy capture, CI gate)
 ```
 
 See `CLAUDE.md` for the full project spec, architecture, and severity semantics.
@@ -208,4 +237,7 @@ severity matrix, flowing through the same pipeline, dedup, alerting, and UI.
 forwards monitored JSON responses to core's `/ingest`, which redacts and runs them through the
 same baseline/diff/alert pipeline. Opt-in via the `proxy` compose profile.
 
-Next phase (see `CLAUDE.md` §3): CI integration.
+**Phase 4 (CI integration) — complete**: the `tremurex` CLI fails a build when a monitored
+dependency has drift at or above a configurable severity, with an optional live `--refresh`.
+
+All four roadmap phases are implemented, tested, and demoable under `docker compose up`.

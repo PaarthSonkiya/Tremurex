@@ -1,0 +1,19 @@
+{
+  "name": "@tremurex/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "tremurex": "./dist/cli.js"
+  },
+  "exports": {
+    "./client": "./src/client.ts",
+    "./runner": "./src/runner.ts",
+    "./check": "./src/check.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run"
+  }
+}

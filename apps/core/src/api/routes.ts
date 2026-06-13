@@ -3,7 +3,7 @@
  * secrets: they go into the DB for polling but NEVER leave the API unmasked,
  * and captured data never appears in URLs or logs (§7.2).
  */
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { JsonValue } from '@tremurex/shared';
@@ -23,6 +23,11 @@ export interface ApiDeps {
    * Phase 3). When absent, the /ingest and /proxy/targets routes are off.
    */
   processCapture?: (dependencyId: string, body: JsonValue) => Promise<PollResult>;
+  /**
+   * Scrapes a poll-mode dependency once, synchronously (CI "check now",
+   * Phase 4). When absent, the POST /dependencies/:id/poll route is off.
+   */
+  pollNow?: (dependencyId: string) => Promise<PollResult>;
 }
 
 const RegisterDependency = z
@@ -57,7 +62,7 @@ function maskDependency(row: DependencyRow) {
 }
 
 export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
-  const { db, syncSchedule, processCapture } = deps;
+  const { db, syncSchedule, processCapture, pollNow } = deps;
 
   app.post('/dependencies', async (request, reply) => {
     const parsed = RegisterDependency.safeParse(request.body);
@@ -87,9 +92,17 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
           .select({ id: baselines.id })
           .from(baselines)
           .where(eq(baselines.dependencyId, row.id));
+        // The open (unresolved) drift, if any — what a CI gate evaluates.
+        const open = await db
+          .select({ id: diffs.id, severity: diffs.severity })
+          .from(diffs)
+          .where(and(eq(diffs.dependencyId, row.id), isNull(diffs.resolvedAt)))
+          .orderBy(desc(diffs.createdAt))
+          .limit(1);
         return {
           ...maskDependency(row),
           status: active.length > 0 ? ('monitoring' as const) : ('baselining' as const),
+          currentDrift: open[0] ?? null,
         };
       }),
     );
@@ -175,6 +188,39 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
       baselineSchema: baseline?.schema ?? null,
     };
   });
+
+  // Synchronous poll trigger (Phase 4 "check now"): mounted when wired in.
+  if (pollNow) {
+    app.post('/dependencies/:id/poll', async (request, reply) => {
+      const params = IdParam.safeParse(request.params);
+      if (!params.success) {
+        return reply.status(400).send({ error: 'invalid-id' });
+      }
+      const dependency = (
+        await db.select().from(dependencies).where(eq(dependencies.id, params.data.id))
+      )[0];
+      if (!dependency) {
+        return reply.status(404).send({ error: 'not-found' });
+      }
+      if (dependency.captureMode === 'proxy') {
+        // Proxy-mode deps are fed passively; there is nothing to scrape.
+        return reply.status(409).send({ error: 'proxy-mode-not-pollable' });
+      }
+      const result = await pollNow(params.data.id);
+      if (result.status === 'skipped') {
+        return { status: 'skipped', reason: result.reason };
+      }
+      const drift =
+        result.outcome.phase === 'monitoring' && result.outcome.drift !== null
+          ? {
+              id: result.outcome.drift.diffRow.id,
+              severity: result.outcome.drift.severity,
+              repeat: result.outcome.drift.repeat,
+            }
+          : null;
+      return { status: 'ok', phase: result.outcome.phase, alerted: result.alerted, drift };
+    });
+  }
 
   // Proxy capture (Phase 3): only mounted when a capture handler is wired in.
   if (processCapture) {
