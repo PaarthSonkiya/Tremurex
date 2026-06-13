@@ -315,3 +315,42 @@ describe('rebaseline: relearn the shape from scratch', () => {
     );
   });
 });
+
+describe('concurrency: captures for one dependency serialize (advisory lock)', () => {
+  const breaking: DiffSchemas = () => ({
+    entries: [createDiffEntry('required-field-removed', ['id'], { before: { type: 'integer' } })],
+  });
+
+  it('concurrent baselining captures lock exactly one baseline', async () => {
+    const service = createBaselineService(db, fakeInference(MERGED));
+    const depId = await insertDependency(5);
+
+    // Fire 10 captures at once; without serialization several could each
+    // observe a full window and lock competing baselines.
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => service.recordCapture(depId, { id: i })),
+    );
+
+    const active = (await db.select().from(baselines)).filter((b) => b.status === 'active');
+    expect(active).toHaveLength(1);
+    // Only the window's worth of samples is accumulated before the lock.
+    expect(await db.select().from(samples)).toHaveLength(5);
+  });
+
+  it('concurrent identical drift records exactly one diff (dedup holds under load)', async () => {
+    const service = createBaselineService(db, fakeInference(MERGED), breaking);
+    const depId = await insertDependency(1);
+    await service.recordCapture(depId, { id: 1 }); // locks baseline
+
+    const outcomes = await Promise.all(
+      Array.from({ length: 8 }, () => service.recordCapture(depId, { email: 'a@x.com' })),
+    );
+
+    expect(await db.select().from(diffs)).toHaveLength(1);
+    // Exactly one capture created the drift; the rest saw it as a repeat.
+    const fresh = outcomes.filter(
+      (o) => o.phase === 'monitoring' && o.drift !== null && !o.drift.repeat,
+    );
+    expect(fresh).toHaveLength(1);
+  });
+});
