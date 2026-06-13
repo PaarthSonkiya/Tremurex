@@ -40,7 +40,11 @@ export function DependencyList({ onSelect }: { onSelect: (depId: string) => void
             </span>
             <span className="meta">
               {dep.kind === 'mcp' && <span className="badge kind">mcp</span>}
-              <span>every {dep.pollIntervalSeconds}s</span>
+              {dep.captureMode === 'proxy' ? (
+                <span className="badge kind">proxy</span>
+              ) : (
+                <span>every {dep.pollIntervalSeconds}s</span>
+              )}
               <span className={`badge ${dep.status}`}>{dep.status}</span>
             </span>
           </button>

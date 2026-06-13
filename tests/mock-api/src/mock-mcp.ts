@@ -10,6 +10,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
@@ -76,15 +77,14 @@ export function startMockMcp(port = 0): Promise<MockMcp> {
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     const mcp = new Server({ name: 'mock-mcp', version: '0.0.0' }, { capabilities: { tools: {} } });
     mcp.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
+    // Stateless mode: omitting sessionIdGenerator leaves it undefined, which
+    // is exactly what the SDK treats as "no sessions".
+    const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
     res.on('close', () => {
       void transport.close();
       void mcp.close();
     });
-    await mcp.connect(transport);
+    await mcp.connect(transport as Transport);
     const raw = await readBody(req);
     await transport.handleRequest(req, res, raw.length > 0 ? JSON.parse(raw) : undefined);
   }

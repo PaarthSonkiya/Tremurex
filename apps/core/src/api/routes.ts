@@ -6,28 +6,48 @@
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
+import type { JsonValue } from '@tremurex/shared';
 import { redactHeaders } from '../capture/redact.js';
 import type { Db } from '../db/client.js';
 import { baselines, dependencies, diffs, samples } from '../db/schema.js';
 import type { DependencyRow } from '../db/schema.js';
+import type { PollResult } from '../pipeline/pipeline.js';
+import { matchProxyDependency, proxyHostKeys } from '../proxy/match.js';
 
 export interface ApiDeps {
   db: Db;
   /** Upserts/removes the BullMQ schedule when a dependency changes. */
   syncSchedule: (dependency: DependencyRow) => Promise<void>;
+  /**
+   * Runs an out-of-band captured body through the pipeline (proxy mode,
+   * Phase 3). When absent, the /ingest and /proxy/targets routes are off.
+   */
+  processCapture?: (dependencyId: string, body: JsonValue) => Promise<PollResult>;
 }
 
-const RegisterDependency = z.object({
-  name: z.string().min(1).max(200),
-  /** 'rest' polls a JSON endpoint; 'mcp' runs initialize → tools/list. */
-  kind: z.enum(['rest', 'mcp']).default('rest'),
+const RegisterDependency = z
+  .object({
+    name: z.string().min(1).max(200),
+    /** 'rest' polls a JSON endpoint; 'mcp' runs initialize → tools/list. */
+    kind: z.enum(['rest', 'mcp']).default('rest'),
+    /** 'poll' scrapes on a schedule; 'proxy' is fed by the sidecar (Phase 3). */
+    captureMode: z.enum(['poll', 'proxy']).default('poll'),
+    url: z.url(),
+    method: z.enum(['GET', 'POST']).default('GET'),
+    headers: z.record(z.string(), z.string()).default({}),
+    pollIntervalSeconds: z.number().int().min(5).max(86_400).default(300),
+    /** Defaults per kind: 5 for rest (multi-sample merge), 1 for mcp (exact catalog). */
+    baselineWindow: z.number().int().min(1).max(100).optional(),
+    alertThreshold: z.enum(['BREAKING', 'WARNING', 'INFO']).default('WARNING'),
+  })
+  .refine((d) => !(d.kind === 'mcp' && d.captureMode === 'proxy'), {
+    error: 'MCP dependencies are polled, not proxy-captured',
+    path: ['captureMode'],
+  });
+
+const IngestCapture = z.object({
   url: z.url(),
-  method: z.enum(['GET', 'POST']).default('GET'),
-  headers: z.record(z.string(), z.string()).default({}),
-  pollIntervalSeconds: z.number().int().min(5).max(86_400).default(300),
-  /** Defaults per kind: 5 for rest (multi-sample merge), 1 for mcp (exact catalog). */
-  baselineWindow: z.number().int().min(1).max(100).optional(),
-  alertThreshold: z.enum(['BREAKING', 'WARNING', 'INFO']).default('WARNING'),
+  body: z.unknown(),
 });
 
 const IdParam = z.object({ id: z.uuid() });
@@ -37,7 +57,7 @@ function maskDependency(row: DependencyRow) {
 }
 
 export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
-  const { db, syncSchedule } = deps;
+  const { db, syncSchedule, processCapture } = deps;
 
   app.post('/dependencies', async (request, reply) => {
     const parsed = RegisterDependency.safeParse(request.body);
@@ -155,4 +175,38 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
       baselineSchema: baseline?.schema ?? null,
     };
   });
+
+  // Proxy capture (Phase 3): only mounted when a capture handler is wired in.
+  if (processCapture) {
+    // Host pre-filter for the sidecar: the distinct hosts it should forward.
+    app.get('/proxy/targets', async () => {
+      const rows = await db.select().from(dependencies);
+      return { hosts: proxyHostKeys(rows) };
+    });
+
+    // The sidecar forwards a captured (url, body); core decides the owner.
+    app.post('/ingest', async (request, reply) => {
+      const parsed = IngestCapture.safeParse(request.body);
+      if (!parsed.success) {
+        return reply
+          .status(400)
+          .send({ error: 'invalid-body', issues: z.treeifyError(parsed.error) });
+      }
+      const rows = await db.select().from(dependencies);
+      const dependency = matchProxyDependency(rows, parsed.data.url);
+      if (!dependency) {
+        // Not monitored — a no-op, not an error (the proxy sees lots of traffic).
+        return reply.status(202).send({ matched: false });
+      }
+      const result = await processCapture(dependency.id, parsed.data.body as JsonValue);
+      return reply.status(202).send({
+        matched: true,
+        dependencyId: dependency.id,
+        result:
+          result.status === 'ok'
+            ? { phase: result.outcome.phase, alerted: result.alerted }
+            : { phase: 'skipped' },
+      });
+    });
+  }
 }

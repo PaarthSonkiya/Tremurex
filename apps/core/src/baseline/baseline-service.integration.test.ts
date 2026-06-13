@@ -12,6 +12,7 @@ import type { Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { alerts, baselines, dependencies, diffs, samples } from '../db/schema.js';
 import { createBaselineService } from './baseline-service.js';
+import type { DiffSchemas } from './baseline-service.js';
 import type { SchemaInference } from '../schema-engine/client.js';
 
 const ADMIN_URL =
@@ -134,15 +135,15 @@ describe('baselining window (§8)', () => {
 });
 
 describe('monitoring after lock', () => {
-  async function lockedService(diff = noDrift) {
+  async function lockedService(diff: DiffSchemas = noDrift) {
     const inference = fakeInference(MERGED);
     const service = createBaselineService(db, inference, diff);
     const depId = await insertDependency(1);
     await service.recordCapture(depId, { id: 1 }); // locks immediately (window 1)
     return { service, depId };
   }
-  const noDrift = () => ({ entries: [] });
-  const breaking = () => ({
+  const noDrift: DiffSchemas = () => ({ entries: [] });
+  const breaking: DiffSchemas = () => ({
     entries: [createDiffEntry('required-field-removed', ['id'], { before: { type: 'integer' } })],
   });
 

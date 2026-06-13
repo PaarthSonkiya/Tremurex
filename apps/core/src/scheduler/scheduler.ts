@@ -30,9 +30,10 @@ export function createPollingQueue(redisUrl: string, queueName = POLLING_QUEUE):
 
 export async function syncDependencySchedule(
   queue: Queue,
-  dependency: Pick<DependencyRow, 'id' | 'pollIntervalSeconds' | 'enabled'>,
+  dependency: Pick<DependencyRow, 'id' | 'pollIntervalSeconds' | 'enabled' | 'captureMode'>,
 ): Promise<void> {
-  if (!dependency.enabled) {
+  // Proxy-mode dependencies are fed by the sidecar, not polled (Phase 3).
+  if (!dependency.enabled || dependency.captureMode === 'proxy') {
     await removeDependencySchedule(queue, dependency.id);
     return;
   }

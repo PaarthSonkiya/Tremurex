@@ -90,6 +90,42 @@ parameter removals, parameter type changes, and parameters becoming required are
 parameters becoming nullable are WARNING; new tools, new optional parameters, and description
 changes are INFO.
 
+### Monitoring real traffic with the passive proxy
+
+Instead of polling, Tremurex can learn from the responses your app actually receives. A
+mitmproxy sidecar observes traffic you route through it and forwards JSON responses of monitored
+hosts to core — it never modifies or blocks anything (passive capture only).
+
+It is opt-in so the default `docker compose up` stays lean:
+
+```sh
+docker compose --profile proxy up        # adds the proxy on :8080
+```
+
+Register a dependency with `"captureMode": "proxy"`. Its `url` is treated as a
+scheme+host+path **prefix** that real request URLs are matched against:
+
+```sh
+curl -X POST http://localhost:4000/dependencies \
+  -H 'content-type: application/json' \
+  -d '{"name":"shop-products","captureMode":"proxy","url":"https://api.shop.example.com/v1/products"}'
+```
+
+Then point the client whose traffic you want to watch at the proxy and trust its CA so it can
+read HTTPS:
+
+```sh
+# Grab the CA the sidecar generated (written to the proxy-certs volume):
+docker compose --profile proxy cp proxy:/certs/mitmproxy-ca-cert.pem ./mitmproxy-ca.pem
+# Install ./mitmproxy-ca.pem in your OS/browser trust store, then route traffic:
+HTTPS_PROXY=http://localhost:8080 HTTP_PROXY=http://localhost:8080 your-app
+```
+
+Captured bodies are redacted (§7.2) and run through the **same** baseline → diff → severity →
+alert pipeline as polling, so everything above — multi-sample baselining, the severity matrix,
+dedup, the timeline and diff UI — applies unchanged. Captures arrive only as your app makes real
+requests, so the baseline locks once enough live traffic has been seen.
+
 ### Alerting
 
 Alerts fire for drift at or above `ALERT_THRESHOLD` (default `WARNING`; INFO drift is recorded
@@ -135,10 +171,9 @@ pnpm install                # JS workspaces
 pnpm test                   # all TS tests (Vitest)
 pnpm lint                   # ESLint + Prettier
 
-cd services/schema-engine
-uv sync                     # Python deps
-uv run pytest               # Python tests
-uv run ruff check .         # Python lint
+for svc in schema-engine proxy; do
+  (cd services/$svc && uv sync && uv run pytest -q && uv run ruff check .)
+done
 ```
 
 Pre-commit hooks (lint + all tests) are installed automatically by `pnpm install` via
@@ -150,9 +185,10 @@ Pre-commit hooks (lint + all tests) are installed automatically by `pnpm install
 apps/core              TS service: capture, baseline store, diff + severity, scheduler, API
 apps/web               React/Vite diff-view UI
 services/schema-engine Python FastAPI + genson inference sidecar
+services/proxy         Python mitmproxy addon: passive capture → core /ingest (Phase 3)
 packages/shared        Shared TS domain types (schema model, Diff, Severity)
-tests/mock-api         Controllable mock server for manufacturing drift (demos + e2e)
-tests/e2e              End-to-end drift lifecycle test (real schema-engine + Postgres)
+tests/mock-api         Controllable mock REST + MCP servers for manufacturing drift
+tests/e2e              End-to-end drift proofs (REST poll, MCP, and proxy capture)
 ```
 
 See `CLAUDE.md` for the full project spec, architecture, and severity semantics.
@@ -168,4 +204,8 @@ via `docker compose up`.
 Streamable HTTP, exact-catalog baselining, and tool-catalog drift classified per the §8 MCP
 severity matrix, flowing through the same pipeline, dedup, alerting, and UI.
 
-Next phases (see `CLAUDE.md` §3): passive proxy capture, CI integration.
+**Phase 3 (passive proxy capture) — complete**: a mitmproxy sidecar observes routed traffic and
+forwards monitored JSON responses to core's `/ingest`, which redacts and runs them through the
+same baseline/diff/alert pipeline. Opt-in via the `proxy` compose profile.
+
+Next phase (see `CLAUDE.md` §3): CI integration.

@@ -92,6 +92,26 @@ services:
       timeout: 3s
       retries: 5
 
+  # Phase 3 passive proxy. Opt-in (keeps the default `docker compose up` to the
+  # five core services per §11): start with `docker compose --profile proxy up`.
+  # Route the traffic you want monitored through it and install the CA it writes
+  # to the proxy-certs volume.
+  proxy:
+    build:
+      context: services/proxy
+    profiles: ['proxy']
+    ports:
+      - '${PROXY_PORT:-8080}:8080'
+    environment:
+      CORE_URL: http://core:4000
+      TREMUREX_REFRESH_SECONDS: ${PROXY_REFRESH_SECONDS:-30}
+    volumes:
+      - proxy-certs:/certs
+    depends_on:
+      core:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   redis-data:
+  proxy-certs:

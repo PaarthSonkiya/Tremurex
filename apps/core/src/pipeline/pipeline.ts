@@ -13,6 +13,7 @@ import type { FetchBody } from '../capture/poll.js';
 import type { Db } from '../db/client.js';
 import { dependencies } from '../db/schema.js';
 import type { DependencyRow, DiffRow } from '../db/schema.js';
+import { redactSecrets } from '../capture/redact.js';
 import { diffSchemas } from '../diff/diff-engine.js';
 import { fetchToolCatalog } from '../mcp/client.js';
 import type { FetchCatalog } from '../mcp/client.js';
@@ -32,7 +33,14 @@ export type PollResult =
   | { status: 'ok'; outcome: CaptureOutcome; alerted: boolean };
 
 export interface Pipeline {
+  /** Scrape the dependency's URL once (poll mode). */
   processPoll(dependencyId: string): Promise<PollResult>;
+  /**
+   * Process a response body captured out-of-band (proxy mode, Phase 3). The
+   * body is raw real traffic, so it is redacted here before anything stores
+   * or infers it (§7.2).
+   */
+  processCapture(dependencyId: string, body: JsonValue): Promise<PollResult>;
 }
 
 export function createPipeline(opts: {
@@ -50,23 +58,18 @@ export function createPipeline(opts: {
     diffSchemas(baseline, capture, { mode: 'capture' }),
   );
 
-  async function processPoll(dependencyId: string): Promise<PollResult> {
+  async function loadEnabled(dependencyId: string): Promise<DependencyRow | 'disabled'> {
     const dependency = (
       await opts.db.select().from(dependencies).where(eq(dependencies.id, dependencyId))
     )[0];
     if (!dependency) {
       throw new Error(`Unknown dependency: ${dependencyId}`);
     }
-    if (!dependency.enabled) {
-      return { status: 'skipped', reason: 'disabled' };
-    }
+    return dependency.enabled ? dependency : 'disabled';
+  }
 
-    // REST bodies arrive already redacted (§7.2); MCP catalogs are schema
-    // metadata (shape, not values) and are captured canonically as-is.
-    const body =
-      dependency.kind === 'mcp'
-        ? ((await fetchCatalog(dependency)) as unknown as JsonValue)
-        : await fetchBody(dependency);
+  /** Shared tail: record the capture, then alert if it crosses the threshold. */
+  async function finishCapture(dependency: DependencyRow, body: JsonValue): Promise<PollResult> {
     const outcome = await baselineService.recordCapture(dependency.id, body);
 
     let alerted = false;
@@ -87,5 +90,29 @@ export function createPipeline(opts: {
     return { status: 'ok', outcome, alerted };
   }
 
-  return { processPoll };
+  async function processPoll(dependencyId: string): Promise<PollResult> {
+    const dependency = await loadEnabled(dependencyId);
+    if (dependency === 'disabled') {
+      return { status: 'skipped', reason: 'disabled' };
+    }
+
+    // REST bodies arrive already redacted (§7.2); MCP catalogs are schema
+    // metadata (shape, not values) and are captured canonically as-is.
+    const body =
+      dependency.kind === 'mcp'
+        ? ((await fetchCatalog(dependency)) as unknown as JsonValue)
+        : await fetchBody(dependency);
+    return finishCapture(dependency, body);
+  }
+
+  async function processCapture(dependencyId: string, body: JsonValue): Promise<PollResult> {
+    const dependency = await loadEnabled(dependencyId);
+    if (dependency === 'disabled') {
+      return { status: 'skipped', reason: 'disabled' };
+    }
+    // Proxy bodies are raw real traffic — redact before storage/inference.
+    return finishCapture(dependency, redactSecrets(body));
+  }
+
+  return { processPoll, processCapture };
 }

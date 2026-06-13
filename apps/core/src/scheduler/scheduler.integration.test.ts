@@ -69,6 +69,7 @@ describe('polling scheduler', () => {
       id: 'dep-1',
       pollIntervalSeconds: 1,
       enabled: true,
+      captureMode: 'poll',
     });
 
     await twice;
@@ -112,13 +113,37 @@ describe('polling scheduler', () => {
     const queue = createPollingQueue(REDIS_URL, name);
     open.queues.push(queue);
 
-    await syncDependencySchedule(queue, { id: 'dep-2', pollIntervalSeconds: 60, enabled: true });
+    await syncDependencySchedule(queue, {
+      id: 'dep-2',
+      pollIntervalSeconds: 60,
+      enabled: true,
+      captureMode: 'poll',
+    });
     expect(await queue.getJobSchedulers()).toHaveLength(1);
 
-    await syncDependencySchedule(queue, { id: 'dep-2', pollIntervalSeconds: 60, enabled: false });
+    await syncDependencySchedule(queue, {
+      id: 'dep-2',
+      pollIntervalSeconds: 60,
+      enabled: false,
+      captureMode: 'poll',
+    });
     expect(await queue.getJobSchedulers()).toHaveLength(0);
 
     // Removing a never-synced dependency is a no-op, not an error.
     await removeDependencySchedule(queue, 'ghost');
+  }, 20_000);
+
+  it('proxy-mode dependencies are never scheduled (the sidecar feeds them)', async () => {
+    const name = testQueueName();
+    const queue = createPollingQueue(REDIS_URL, name);
+    open.queues.push(queue);
+
+    await syncDependencySchedule(queue, {
+      id: 'dep-proxy',
+      pollIntervalSeconds: 60,
+      enabled: true,
+      captureMode: 'proxy',
+    });
+    expect(await queue.getJobSchedulers()).toHaveLength(0);
   }, 20_000);
 });

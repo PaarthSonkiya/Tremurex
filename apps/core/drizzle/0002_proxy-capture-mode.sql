@@ -1,0 +1,1 @@
+ALTER TABLE "dependencies" ADD COLUMN "capture_mode" text DEFAULT 'poll' NOT NULL;

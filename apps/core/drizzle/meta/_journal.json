@@ -15,6 +15,13 @@
       "when": 1781280260876,
       "tag": "0001_drift-dedup",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781328794856,
+      "tag": "0002_proxy-capture-mode",
+      "breakpoints": true
     }
   ]
 }

@@ -14,6 +14,14 @@ export const dependencies = pgTable('dependencies', {
   kind: text('kind', { enum: ['rest', 'mcp'] })
     .notNull()
     .default('rest'),
+  /**
+   * How captures arrive. 'poll' scrapes the URL on a schedule (Phase 1/2);
+   * 'proxy' receives them from the passive mitmproxy sidecar (Phase 3), which
+   * matches real traffic against this URL as a scheme+host+path prefix.
+   */
+  captureMode: text('capture_mode', { enum: ['poll', 'proxy'] })
+    .notNull()
+    .default('poll'),
   url: text('url').notNull(),
   method: text('method').notNull().default('GET'),
   /**

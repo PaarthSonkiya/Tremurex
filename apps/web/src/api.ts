@@ -17,6 +17,7 @@ export interface Dependency {
   id: string;
   name: string;
   kind: 'rest' | 'mcp';
+  captureMode: 'poll' | 'proxy';
   url: string;
   method: string;
   pollIntervalSeconds: number;

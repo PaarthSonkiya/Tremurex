@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import pg from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { createDiffEntry } from '@tremurex/shared';
+import type { JsonValue } from '@tremurex/shared';
 import { buildApp } from '../app.js';
 import { createDb } from '../db/client.js';
 import type { Db } from '../db/client.js';
@@ -219,5 +220,85 @@ describe('GET /diffs/:id', () => {
     expect(body.entries[0]).toMatchObject({ rule: 'required-field-removed', path: '$.id' });
     expect(body.baselineSchema.required).toEqual(['id']);
     expect(body.dependency.name).toBe('a');
+  });
+});
+
+describe('proxy capture routes (Phase 3)', () => {
+  let proxyApp: FastifyInstance;
+  let captured: { dependencyId: string; body: JsonValue }[] = [];
+
+  beforeAll(async () => {
+    proxyApp = await buildApp({
+      db,
+      syncSchedule: () => Promise.resolve(),
+      processCapture: (dependencyId, body) => {
+        captured.push({ dependencyId, body });
+        return Promise.resolve({
+          status: 'ok',
+          outcome: { phase: 'baselining', samplesCollected: 1, window: 5 },
+          alerted: false,
+        });
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await proxyApp.close();
+  });
+
+  beforeEach(() => {
+    captured = [];
+  });
+
+  it('GET /proxy/targets lists distinct hosts of enabled proxy dependencies', async () => {
+    await db.insert(dependencies).values([
+      { name: 'p1', captureMode: 'proxy', url: 'https://api.acme.test/v1/users' },
+      { name: 'p2', captureMode: 'proxy', url: 'https://api.acme.test/v1/orders' },
+      { name: 'polled', captureMode: 'poll', url: 'https://polled.test/x' },
+    ]);
+    const res = await proxyApp.inject({ method: 'GET', url: '/proxy/targets' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ hosts: string[] }>().hosts).toEqual(['api.acme.test:443']);
+  });
+
+  it('POST /ingest matches a forwarded URL to its dependency and runs the pipeline', async () => {
+    const [dep] = await db
+      .insert(dependencies)
+      .values({ name: 'p', captureMode: 'proxy', url: 'https://api.acme.test/v1/users' })
+      .returning();
+    if (!dep) throw new Error('insert failed');
+
+    const res = await proxyApp.inject({
+      method: 'POST',
+      url: '/ingest',
+      payload: { url: 'https://api.acme.test/v1/users/42?expand=true', body: { id: 42 } },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json<{ matched: boolean; dependencyId: string }>()).toMatchObject({
+      matched: true,
+      dependencyId: dep.id,
+    });
+    expect(captured).toEqual([{ dependencyId: dep.id, body: { id: 42 } }]);
+  });
+
+  it('POST /ingest reports matched:false for unmonitored URLs without running the pipeline', async () => {
+    const res = await proxyApp.inject({
+      method: 'POST',
+      url: '/ingest',
+      payload: { url: 'https://unmonitored.test/whatever', body: { x: 1 } },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json<{ matched: boolean }>().matched).toBe(false);
+    expect(captured).toHaveLength(0);
+  });
+
+  it('POST /ingest rejects a malformed body with 400', async () => {
+    const res = await proxyApp.inject({
+      method: 'POST',
+      url: '/ingest',
+      payload: { url: 'not-a-url', body: {} },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(captured).toHaveLength(0);
   });
 });

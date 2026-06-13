@@ -1,0 +1,31 @@
+[project]
+name = "tremurex-proxy"
+version = "0.0.0"
+description = "Tremurex passive proxy: a mitmproxy addon that forwards monitored JSON responses to core for drift inference."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mitmproxy>=11.0",
+    "httpx>=0.28",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# Tests poke private attributes deliberately to inject fakes.
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["SLF001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
