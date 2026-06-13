@@ -272,3 +272,46 @@ describe('drift dedup (user-approved 2026-06-12): identical repeats are suppress
     expect(await db.select().from(diffs)).toHaveLength(2);
   });
 });
+
+describe('rebaseline: relearn the shape from scratch', () => {
+  const breaking: DiffSchemas = () => ({
+    entries: [createDiffEntry('required-field-removed', ['id'], { before: { type: 'integer' } })],
+  });
+
+  it('supersedes the baseline, clears samples, resolves drift, and relocks on the next window', async () => {
+    const inference = fakeInference(MERGED);
+    const service = createBaselineService(db, inference, breaking);
+    const depId = await insertDependency(1);
+    await service.recordCapture(depId, { id: 1 }); // locks baseline
+    await service.recordCapture(depId, {}); // opens BREAKING drift
+    expect((await db.select().from(diffs)).every((d) => d.resolvedAt === null)).toBe(true);
+
+    const { supersededBaselineId } = await service.rebaseline(depId);
+    expect(supersededBaselineId).not.toBeNull();
+    expect(await service.getActiveBaseline(depId)).toBeNull();
+    expect(await db.select().from(samples)).toHaveLength(0);
+    expect((await db.select().from(diffs)).every((d) => d.resolvedAt !== null)).toBe(true);
+
+    // The next capture starts a fresh window and locks a new baseline (window 1).
+    const relock = await service.recordCapture(depId, { id: 2 });
+    expect(relock.phase).toBe('baseline-locked');
+    const active = await service.getActiveBaseline(depId);
+    expect(active?.id).not.toBe(supersededBaselineId);
+  });
+
+  it('is a no-op-safe operation when there is no baseline yet', async () => {
+    const service = createBaselineService(db, fakeInference(MERGED));
+    const depId = await insertDependency(3);
+    await service.recordCapture(depId, { id: 1 }); // still baselining
+    const { supersededBaselineId } = await service.rebaseline(depId);
+    expect(supersededBaselineId).toBeNull();
+    expect(await db.select().from(samples)).toHaveLength(0);
+  });
+
+  it('rejects an unknown dependency', async () => {
+    const service = createBaselineService(db, fakeInference(MERGED));
+    await expect(service.rebaseline('00000000-0000-0000-0000-000000000000')).rejects.toThrow(
+      /Unknown dependency/,
+    );
+  });
+});

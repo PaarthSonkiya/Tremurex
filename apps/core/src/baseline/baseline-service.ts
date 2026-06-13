@@ -39,6 +39,13 @@ export const noopDiff: DiffSchemas = () => ({ entries: [] });
 export interface BaselineService {
   recordCapture(dependencyId: string, body: JsonValue): Promise<CaptureOutcome>;
   getActiveBaseline(dependencyId: string): Promise<BaselineRow | null>;
+  /**
+   * Discard what "normal" means for a dependency and relearn it. Supersedes
+   * the active baseline, clears accumulated samples, and resolves open drift,
+   * so the next captures rebuild a fresh baseline. Used when an API has
+   * legitimately changed shape and the new shape should become the reference.
+   */
+  rebaseline(dependencyId: string): Promise<{ supersededBaselineId: string | null }>;
 }
 
 export type CaptureOutcome =
@@ -183,5 +190,28 @@ export function createBaselineService(
     return { phase: 'monitoring', drift: { diffRow, severity, repeat: false } };
   }
 
-  return { recordCapture, getActiveBaseline };
+  async function rebaseline(
+    dependencyId: string,
+  ): Promise<{ supersededBaselineId: string | null }> {
+    const dependency = (
+      await db.select().from(dependencies).where(eq(dependencies.id, dependencyId))
+    )[0];
+    if (!dependency) {
+      throw new Error(`Unknown dependency: ${dependencyId}`);
+    }
+    const active = await getActiveBaseline(dependencyId);
+    if (active) {
+      await db.update(baselines).set({ status: 'superseded' }).where(eq(baselines.id, active.id));
+    }
+    // Resolve any open drift — it is now against a baseline being retired.
+    await db
+      .update(diffs)
+      .set({ resolvedAt: new Date() })
+      .where(and(eq(diffs.dependencyId, dependencyId), isNull(diffs.resolvedAt)));
+    // Clear accumulated samples so the next window starts from zero.
+    await db.delete(samples).where(eq(samples.dependencyId, dependencyId));
+    return { supersededBaselineId: active?.id ?? null };
+  }
+
+  return { recordCapture, getActiveBaseline, rebaseline };
 }

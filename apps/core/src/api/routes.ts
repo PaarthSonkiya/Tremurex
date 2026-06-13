@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import type { JsonValue } from '@tremurex/shared';
 import { redactHeaders } from '../capture/redact.js';
 import type { Db } from '../db/client.js';
-import { baselines, dependencies, diffs, samples } from '../db/schema.js';
+import { alerts, baselines, dependencies, diffs, samples } from '../db/schema.js';
 import type { DependencyRow } from '../db/schema.js';
 import type { PollResult } from '../pipeline/pipeline.js';
 import { matchProxyDependency, proxyHostKeys } from '../proxy/match.js';
@@ -28,6 +28,11 @@ export interface ApiDeps {
    * Phase 4). When absent, the POST /dependencies/:id/poll route is off.
    */
   pollNow?: (dependencyId: string) => Promise<PollResult>;
+  /**
+   * Relearns a dependency's baseline from scratch. When absent, the
+   * POST /dependencies/:id/rebaseline route is off.
+   */
+  rebaseline?: (dependencyId: string) => Promise<{ supersededBaselineId: string | null }>;
 }
 
 const RegisterDependency = z
@@ -50,6 +55,25 @@ const RegisterDependency = z
     path: ['captureMode'],
   });
 
+/**
+ * Editable operational fields. `kind` and `captureMode` define the monitoring
+ * model and are intentionally immutable — change those by deleting and
+ * re-registering. At least one field must be present.
+ */
+const UpdateDependency = z
+  .object({
+    name: z.string().min(1).max(200),
+    url: z.url(),
+    method: z.enum(['GET', 'POST']),
+    headers: z.record(z.string(), z.string()),
+    pollIntervalSeconds: z.number().int().min(5).max(86_400),
+    baselineWindow: z.number().int().min(1).max(100),
+    alertThreshold: z.enum(['BREAKING', 'WARNING', 'INFO']),
+    enabled: z.boolean(),
+  })
+  .partial()
+  .refine((d) => Object.keys(d).length > 0, { error: 'no fields to update' });
+
 const IngestCapture = z.object({
   url: z.url(),
   body: z.unknown(),
@@ -62,7 +86,7 @@ function maskDependency(row: DependencyRow) {
 }
 
 export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
-  const { db, syncSchedule, processCapture, pollNow } = deps;
+  const { db, syncSchedule, processCapture, pollNow, rebaseline } = deps;
 
   app.post('/dependencies', async (request, reply) => {
     const parsed = RegisterDependency.safeParse(request.body);
@@ -107,6 +131,49 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
       }),
     );
     return withStatus;
+  });
+
+  app.patch('/dependencies/:id', async (request, reply) => {
+    const params = IdParam.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({ error: 'invalid-id' });
+    }
+    const parsed = UpdateDependency.safeParse(request.body);
+    if (!parsed.success) {
+      return reply
+        .status(400)
+        .send({ error: 'invalid-body', issues: z.treeifyError(parsed.error) });
+    }
+    const updated = await db
+      .update(dependencies)
+      .set(parsed.data)
+      .where(eq(dependencies.id, params.data.id))
+      .returning();
+    const dependency = updated[0];
+    if (!dependency) {
+      return reply.status(404).send({ error: 'not-found' });
+    }
+    // Cadence/enabled may have changed — reconcile the schedule.
+    await syncSchedule(dependency);
+    return maskDependency(dependency);
+  });
+
+  app.delete('/dependencies/:id', async (request, reply) => {
+    const params = IdParam.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({ error: 'invalid-id' });
+    }
+    const dependency = (
+      await db.select().from(dependencies).where(eq(dependencies.id, params.data.id))
+    )[0];
+    if (!dependency) {
+      return reply.status(404).send({ error: 'not-found' });
+    }
+    // Tear down the schedule before the row (and its samples/baselines/diffs/
+    // alerts via FK cascade) disappear.
+    await syncSchedule({ ...dependency, enabled: false });
+    await db.delete(dependencies).where(eq(dependencies.id, params.data.id));
+    return reply.status(204).send();
   });
 
   app.get('/dependencies/:id/timeline', async (request, reply) => {
@@ -161,6 +228,32 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
     };
   });
 
+  app.get('/dependencies/:id/alerts', async (request, reply) => {
+    const params = IdParam.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({ error: 'invalid-id' });
+    }
+    const dependency = (
+      await db.select().from(dependencies).where(eq(dependencies.id, params.data.id))
+    )[0];
+    if (!dependency) {
+      return reply.status(404).send({ error: 'not-found' });
+    }
+    const rows = await db
+      .select()
+      .from(alerts)
+      .where(eq(alerts.dependencyId, params.data.id))
+      .orderBy(desc(alerts.createdAt));
+    return rows.map((a) => ({
+      id: a.id,
+      diffId: a.diffId,
+      channel: a.channel,
+      status: a.status,
+      error: a.error,
+      createdAt: a.createdAt.toISOString(),
+    }));
+  });
+
   app.get('/diffs/:id', async (request, reply) => {
     const params = IdParam.safeParse(request.params);
     if (!params.success) {
@@ -188,6 +281,50 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
       baselineSchema: baseline?.schema ?? null,
     };
   });
+
+  // Manually mark a drift resolved (triage), without waiting for a clean
+  // capture. Idempotent: re-resolving keeps the original resolution time.
+  app.post('/diffs/:id/resolve', async (request, reply) => {
+    const params = IdParam.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({ error: 'invalid-id' });
+    }
+    const diffRow = (await db.select().from(diffs).where(eq(diffs.id, params.data.id)))[0];
+    if (!diffRow) {
+      return reply.status(404).send({ error: 'not-found' });
+    }
+    if (diffRow.resolvedAt) {
+      return { id: diffRow.id, resolvedAt: diffRow.resolvedAt.toISOString() };
+    }
+    const updated = await db
+      .update(diffs)
+      .set({ resolvedAt: new Date() })
+      .where(eq(diffs.id, params.data.id))
+      .returning();
+    const row = updated[0];
+    if (!row) {
+      return reply.status(500).send({ error: 'update-failed' });
+    }
+    return { id: row.id, resolvedAt: row.resolvedAt?.toISOString() ?? null };
+  });
+
+  // Relearn a dependency's baseline (Phase 5): only when wired in.
+  if (rebaseline) {
+    app.post('/dependencies/:id/rebaseline', async (request, reply) => {
+      const params = IdParam.safeParse(request.params);
+      if (!params.success) {
+        return reply.status(400).send({ error: 'invalid-id' });
+      }
+      const dependency = (
+        await db.select().from(dependencies).where(eq(dependencies.id, params.data.id))
+      )[0];
+      if (!dependency) {
+        return reply.status(404).send({ error: 'not-found' });
+      }
+      const result = await rebaseline(params.data.id);
+      return { status: 'rebaselining', ...result };
+    });
+  }
 
   // Synchronous poll trigger (Phase 4 "check now"): mounted when wired in.
   if (pollNow) {

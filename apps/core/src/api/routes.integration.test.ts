@@ -406,3 +406,257 @@ describe('proxy capture routes (Phase 3)', () => {
     expect(captured).toHaveLength(0);
   });
 });
+
+describe('PATCH /dependencies/:id', () => {
+  it('updates editable fields and re-syncs the schedule', async () => {
+    const [dep] = await db
+      .insert(dependencies)
+      .values({ name: 'a', url: 'https://a.test', pollIntervalSeconds: 300 })
+      .returning();
+    if (!dep) throw new Error('insert failed');
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/dependencies/${dep.id}`,
+      payload: { name: 'renamed', pollIntervalSeconds: 60, headers: { authorization: 'Bearer x' } },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{
+      name: string;
+      pollIntervalSeconds: number;
+      headers: Record<string, string>;
+    }>();
+    expect(body.name).toBe('renamed');
+    expect(body.pollIntervalSeconds).toBe(60);
+    expect(body.headers.authorization).toBe('[REDACTED]'); // masked in the response
+    expect(synced.at(-1)?.pollIntervalSeconds).toBe(60); // schedule reconciled
+
+    const stored = await db.select().from(dependencies).where(eq(dependencies.id, dep.id));
+    expect(stored[0]?.headers.authorization).toBe('Bearer x'); // real value persisted
+  });
+
+  it('400s on an empty or invalid patch, 404s on unknown id', async () => {
+    const [dep] = await db
+      .insert(dependencies)
+      .values({ name: 'a', url: 'https://a.test' })
+      .returning();
+    if (!dep) throw new Error('insert failed');
+    expect(
+      (await app.inject({ method: 'PATCH', url: `/dependencies/${dep.id}`, payload: {} }))
+        .statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: 'PATCH',
+          url: `/dependencies/${dep.id}`,
+          payload: { pollIntervalSeconds: 1 },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: 'PATCH',
+          url: '/dependencies/00000000-0000-0000-0000-000000000000',
+          payload: { name: 'x' },
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+});
+
+describe('DELETE /dependencies/:id', () => {
+  it('removes the dependency and cascades its samples/baselines/diffs/alerts', async () => {
+    const [dep] = await db
+      .insert(dependencies)
+      .values({ name: 'a', url: 'https://a.test' })
+      .returning();
+    if (!dep) throw new Error('insert failed');
+    const [baseline] = await db
+      .insert(baselines)
+      .values({ dependencyId: dep.id, schema: { type: 'object' }, sampleCount: 1 })
+      .returning();
+    if (!baseline) throw new Error('insert failed');
+    const [diffRow] = await db
+      .insert(diffs)
+      .values({
+        dependencyId: dep.id,
+        baselineId: baseline.id,
+        entries: [],
+        severity: 'INFO',
+        capturedSchema: { type: 'object' },
+      })
+      .returning();
+    if (!diffRow) throw new Error('insert failed');
+    await db.insert(alerts).values({
+      dependencyId: dep.id,
+      diffId: diffRow.id,
+      channel: 'webhook',
+      status: 'sent',
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: `/dependencies/${dep.id}` });
+    expect(res.statusCode).toBe(204);
+    expect(await db.select().from(dependencies)).toHaveLength(0);
+    expect(await db.select().from(baselines)).toHaveLength(0);
+    expect(await db.select().from(diffs)).toHaveLength(0);
+    expect(await db.select().from(alerts)).toHaveLength(0);
+  });
+
+  it('404s on unknown id', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/dependencies/00000000-0000-0000-0000-000000000000',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('POST /diffs/:id/resolve', () => {
+  async function seedDiff() {
+    const [dep] = await db
+      .insert(dependencies)
+      .values({ name: 'a', url: 'https://a.test' })
+      .returning();
+    if (!dep) throw new Error('insert failed');
+    const [baseline] = await db
+      .insert(baselines)
+      .values({ dependencyId: dep.id, schema: { type: 'object' }, sampleCount: 1 })
+      .returning();
+    if (!baseline) throw new Error('insert failed');
+    const [diffRow] = await db
+      .insert(diffs)
+      .values({
+        dependencyId: dep.id,
+        baselineId: baseline.id,
+        entries: [],
+        severity: 'BREAKING',
+        capturedSchema: { type: 'object' },
+      })
+      .returning();
+    if (!diffRow) throw new Error('insert failed');
+    return diffRow;
+  }
+
+  it('marks an open diff resolved and is idempotent', async () => {
+    const diffRow = await seedDiff();
+    const first = await app.inject({ method: 'POST', url: `/diffs/${diffRow.id}/resolve` });
+    expect(first.statusCode).toBe(200);
+    const at = first.json<{ resolvedAt: string }>().resolvedAt;
+    expect(at).not.toBeNull();
+
+    const again = await app.inject({ method: 'POST', url: `/diffs/${diffRow.id}/resolve` });
+    expect(again.json<{ resolvedAt: string }>().resolvedAt).toBe(at); // unchanged
+  });
+
+  it('404s on unknown diff id', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/diffs/00000000-0000-0000-0000-000000000000/resolve',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('GET /dependencies/:id/alerts', () => {
+  it('returns the alert delivery history, newest first', async () => {
+    const [dep] = await db
+      .insert(dependencies)
+      .values({ name: 'a', url: 'https://a.test' })
+      .returning();
+    if (!dep) throw new Error('insert failed');
+    const [baseline] = await db
+      .insert(baselines)
+      .values({ dependencyId: dep.id, schema: { type: 'object' }, sampleCount: 1 })
+      .returning();
+    if (!baseline) throw new Error('insert failed');
+    const [diffRow] = await db
+      .insert(diffs)
+      .values({
+        dependencyId: dep.id,
+        baselineId: baseline.id,
+        entries: [],
+        severity: 'BREAKING',
+        capturedSchema: { type: 'object' },
+      })
+      .returning();
+    if (!diffRow) throw new Error('insert failed');
+    await db.insert(alerts).values([
+      { dependencyId: dep.id, diffId: diffRow.id, channel: 'webhook', status: 'sent' },
+      {
+        dependencyId: dep.id,
+        diffId: diffRow.id,
+        channel: 'slack',
+        status: 'failed',
+        error: 'boom',
+      },
+    ]);
+
+    const res = await app.inject({ method: 'GET', url: `/dependencies/${dep.id}/alerts` });
+    expect(res.statusCode).toBe(200);
+    const rows = res.json<{ channel: string; status: string; error: string | null }[]>();
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.channel).sort()).toEqual(['slack', 'webhook']);
+    expect(rows.find((r) => r.channel === 'slack')?.error).toBe('boom');
+  });
+
+  it('404s on unknown dependency', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/dependencies/00000000-0000-0000-0000-000000000000/alerts',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('POST /dependencies/:id/rebaseline', () => {
+  let rebaselineApp: FastifyInstance;
+  let rebaselined: string[] = [];
+
+  beforeAll(async () => {
+    rebaselineApp = await buildApp({
+      db,
+      syncSchedule: () => Promise.resolve(),
+      rebaseline: (id) => {
+        rebaselined.push(id);
+        return Promise.resolve({ supersededBaselineId: 'old-baseline' });
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await rebaselineApp.close();
+  });
+
+  beforeEach(() => {
+    rebaselined = [];
+  });
+
+  it('triggers a rebaseline for a known dependency', async () => {
+    const [dep] = await db
+      .insert(dependencies)
+      .values({ name: 'a', url: 'https://a.test' })
+      .returning();
+    if (!dep) throw new Error('insert failed');
+    const res = await rebaselineApp.inject({
+      method: 'POST',
+      url: `/dependencies/${dep.id}/rebaseline`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ status: string; supersededBaselineId: string }>()).toMatchObject({
+      status: 'rebaselining',
+      supersededBaselineId: 'old-baseline',
+    });
+    expect(rebaselined).toEqual([dep.id]);
+  });
+
+  it('404s on unknown dependency', async () => {
+    const res = await rebaselineApp.inject({
+      method: 'POST',
+      url: '/dependencies/00000000-0000-0000-0000-000000000000/rebaseline',
+    });
+    expect(res.statusCode).toBe(404);
+    expect(rebaselined).toHaveLength(0);
+  });
+});

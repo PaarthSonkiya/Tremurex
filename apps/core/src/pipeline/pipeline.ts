@@ -41,6 +41,8 @@ export interface Pipeline {
    * or infers it (§7.2).
    */
   processCapture(dependencyId: string, body: JsonValue): Promise<PollResult>;
+  /** Relearn a dependency's baseline from scratch (delegates to the store). */
+  rebaseline(dependencyId: string): Promise<{ supersededBaselineId: string | null }>;
 }
 
 export function createPipeline(opts: {
@@ -114,5 +116,9 @@ export function createPipeline(opts: {
     return finishCapture(dependency, redactSecrets(body));
   }
 
-  return { processPoll, processCapture };
+  return {
+    processPoll,
+    processCapture,
+    rebaseline: (dependencyId) => baselineService.rebaseline(dependencyId),
+  };
 }
