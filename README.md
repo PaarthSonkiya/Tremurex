@@ -150,6 +150,23 @@ to the timeline but never pushed). Configure destinations in `.env` — both opt
 
 Every delivery attempt (sent or failed) is recorded in alert history.
 
+### Hardening
+
+Sensible defaults that you can tighten in `.env` (see `.env.example`):
+
+- **Response size cap** — captured bodies are bounded (`TREMUREX_MAX_RESPONSE_BYTES`, default
+  10 MiB) so a slow or hostile endpoint can't exhaust memory.
+- **SSRF guard** — link-local / cloud-metadata addresses (`169.254.0.0/16`, `fe80::/10`, IMDSv6)
+  are **always** refused, at both registration and poll time. Private/loopback ranges stay
+  allowed so you can monitor internal APIs; set `TREMUREX_BLOCK_PRIVATE_IPS=true` to block those
+  too.
+- **API auth (optional)** — set `TREMUREX_API_TOKEN` (≥16 chars) to require
+  `Authorization: Bearer <token>` on every route except `/health`. The CLI reads the same
+  variable; the web UI reads `VITE_API_TOKEN` at build time. Unset = no auth (the zero-config
+  default).
+- **CORS** — locked to the local web UI by default; override with `TREMUREX_ALLOWED_ORIGINS`
+  (comma-separated, or `*` to reflect any origin).
+
 ### Failing CI on drift
 
 The `tremurex` CLI turns drift into a build gate. It asks a running core which
@@ -169,13 +186,23 @@ Options: `--url` (or `TREMUREX_CORE_URL`), `--threshold BREAKING|WARNING|INFO`,
 **2** usage/connection error.
 
 In GitHub Actions, run core (e.g. as a service or a prior `docker compose up -d`
-step) and then:
+step) and then either call the CLI directly:
 
 ```yaml
 - name: Check API dependencies for drift
   run: node apps/cli/dist/cli.js check --refresh --threshold BREAKING
   env:
     TREMUREX_CORE_URL: http://localhost:4000
+```
+
+…or use the bundled composite action:
+
+```yaml
+- uses: PaarthSonkiya/tremurex/.github/actions/drift-gate@main
+  with:
+    core-url: http://localhost:4000
+    threshold: BREAKING
+    refresh: 'true'
 ```
 
 ### Manufacture drift in 2 minutes (demo)
@@ -203,6 +230,17 @@ curl -X PUT http://localhost:5050/__control/response \
 The same works for MCP: `pnpm --filter @tremurex/mock-api start:mcp` serves a mock MCP server
 on port 5051 (register `http://host.docker.internal:5051/mcp` with `"kind": "mcp"`), and
 `PUT http://localhost:5051/__control/tools` mutates its tool catalog.
+
+## Health & API reference
+
+Core exposes three unauthenticated, secret-free endpoints for operations and discovery:
+
+- `GET /health` — **liveness**: the process is up.
+- `GET /ready` — **readiness**: returns `200` only when Postgres, Redis, and the schema-engine are
+  all reachable; `503` otherwise (with a per-check breakdown). Point your orchestrator's readiness
+  probe here.
+- `GET /openapi.json` — a self-served **OpenAPI 3.1** description of the REST API (§9). Load it in
+  any OpenAPI viewer; nothing is sent anywhere.
 
 ## Development
 
@@ -234,7 +272,9 @@ tests/mock-api         Controllable mock REST + MCP servers for manufacturing dr
 tests/e2e              End-to-end drift proofs (REST poll, MCP, proxy capture, CI gate)
 ```
 
-See `CLAUDE.md` for the full project spec, architecture, and severity semantics.
+See `CLAUDE.md` for the full project spec, architecture, and severity semantics,
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) to get set up, and [`SECURITY.md`](./SECURITY.md) for the
+security model and private vulnerability reporting.
 
 ## Status
 

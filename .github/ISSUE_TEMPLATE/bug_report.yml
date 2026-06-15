@@ -1,0 +1,53 @@
+name: Bug report
+description: Something isn't working as documented
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please do **not** include captured payloads, tokens, or other
+        secrets. For security vulnerabilities, follow SECURITY.md instead of filing here.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - core (TS)
+        - schema-engine (Python)
+        - proxy (Python)
+        - web (UI)
+        - cli
+        - docker / compose
+        - other / unsure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Register a dependency with ...
+        2. ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Commit/tag, OS, Docker version, Node/Python versions where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact anything sensitive before pasting.
+      render: shell

@@ -1,0 +1,7 @@
+# Default owner for everything in the repo.
+*       @PaarthSonkiya
+
+# The diff + severity engine is the product — review it closely.
+/apps/core/src/diff/        @PaarthSonkiya
+/apps/core/src/mcp/         @PaarthSonkiya
+/services/schema-engine/    @PaarthSonkiya

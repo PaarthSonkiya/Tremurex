@@ -1,0 +1,45 @@
+version: 2
+updates:
+  # JavaScript / TypeScript workspaces (pnpm).
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 10
+    groups:
+      dev-dependencies:
+        dependency-type: 'development'
+
+  # Python sidecars (uv reads pyproject.toml).
+  - package-ecosystem: 'pip'
+    directory: '/services/schema-engine'
+    schedule:
+      interval: 'weekly'
+  - package-ecosystem: 'pip'
+    directory: '/services/proxy'
+    schedule:
+      interval: 'weekly'
+
+  # GitHub Actions used by CI and the drift-gate composite action.
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+
+  # Container base images.
+  - package-ecosystem: 'docker'
+    directory: '/apps/core'
+    schedule:
+      interval: 'weekly'
+  - package-ecosystem: 'docker'
+    directory: '/apps/web'
+    schedule:
+      interval: 'weekly'
+  - package-ecosystem: 'docker'
+    directory: '/services/schema-engine'
+    schedule:
+      interval: 'weekly'
+  - package-ecosystem: 'docker'
+    directory: '/services/proxy'
+    schedule:
+      interval: 'weekly'
