@@ -1,8 +1,10 @@
 import { request } from 'undici';
 import {
   createAlertDispatcher,
+  createEmailChannel,
   createSlackChannel,
   createSlackClient,
+  createSmtpTransport,
   createWebhookChannel,
 } from './alerting/alerting.js';
 import type { ReadinessCheck } from './app.js';
@@ -35,6 +37,19 @@ if (config.ALERT_WEBHOOK_URL) {
 if (config.SLACK_BOT_TOKEN && config.SLACK_CHANNEL) {
   channels.push(
     createSlackChannel(config.SLACK_CHANNEL, createSlackClient(config.SLACK_BOT_TOKEN)),
+  );
+}
+if (config.SMTP_HOST && config.ALERT_EMAIL_FROM && config.ALERT_EMAIL_TO) {
+  const transport = createSmtpTransport({
+    host: config.SMTP_HOST,
+    port: config.SMTP_PORT,
+    secure: config.SMTP_SECURE,
+    ...(config.SMTP_USER && config.SMTP_PASS
+      ? { auth: { user: config.SMTP_USER, pass: config.SMTP_PASS } }
+      : {}),
+  });
+  channels.push(
+    createEmailChannel({ from: config.ALERT_EMAIL_FROM, to: config.ALERT_EMAIL_TO }, transport),
   );
 }
 

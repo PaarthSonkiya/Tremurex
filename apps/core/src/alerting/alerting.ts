@@ -7,6 +7,7 @@
  */
 import { request } from 'undici';
 import { WebClient } from '@slack/web-api';
+import nodemailer from 'nodemailer';
 import { countBySeverity } from '@tremurex/shared';
 import type { Db } from '../db/client.js';
 import { alerts } from '../db/schema.js';
@@ -22,7 +23,7 @@ export interface AlertPayload {
 }
 
 export interface AlertChannel {
-  name: 'webhook' | 'slack';
+  name: 'webhook' | 'slack' | 'email';
   send(payload: AlertPayload): Promise<void>;
 }
 
@@ -78,6 +79,84 @@ export function createSlackChannel(channel: string, client: SlackClientLike): Al
 
 export function createSlackClient(token: string): SlackClientLike {
   return new WebClient(token);
+}
+
+/** One outbound email. Matches the slice of nodemailer's sendMail we use. */
+export interface MailMessage {
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+}
+
+/** Structural slice of nodemailer's Transporter, so tests can fake it. */
+export interface MailTransportLike {
+  sendMail(message: MailMessage): Promise<unknown>;
+}
+
+export interface EmailChannelOptions {
+  /** Envelope sender, e.g. "Tremurex <alerts@example.com>". */
+  from: string;
+  /** One or more recipients (a comma-separated list is allowed). */
+  to: string;
+}
+
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  /** true for implicit TLS (port 465); false uses STARTTLS where offered. */
+  secure: boolean;
+  /** Omit for relays that accept unauthenticated mail. */
+  auth?: { user: string; pass: string };
+}
+
+export function createEmailChannel(
+  opts: EmailChannelOptions,
+  transport: MailTransportLike,
+): AlertChannel {
+  return {
+    name: 'email',
+    async send(payload: AlertPayload): Promise<void> {
+      await transport.sendMail({
+        from: opts.from,
+        to: opts.to,
+        subject: formatEmailSubject(payload),
+        text: formatEmailText(payload),
+      });
+    },
+  };
+}
+
+export function createSmtpTransport(config: SmtpConfig): MailTransportLike {
+  return nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    ...(config.auth ? { auth: config.auth } : {}),
+  });
+}
+
+export function formatEmailSubject(payload: AlertPayload): string {
+  return `[Tremurex] ${payload.severity} drift in ${payload.dependency.name}`;
+}
+
+export function formatEmailText(payload: AlertPayload): string {
+  const counts = countBySeverity({ entries: payload.entries });
+  const summary = (['BREAKING', 'WARNING', 'INFO'] as const)
+    .filter((s) => counts[s] > 0)
+    .map((s) => `${String(counts[s])} ${s}`)
+    .join(', ');
+  const lines = payload.entries.map((e) => `  • [${e.severity}] ${e.rule} at ${e.path}`);
+  return [
+    `Tremurex detected ${payload.severity} drift in ${payload.dependency.name} (${payload.dependency.url}).`,
+    '',
+    `Detected: ${payload.detectedAt}`,
+    `Changes:  ${summary}`,
+    '',
+    ...lines,
+    '',
+    `Diff ID: ${payload.diffId}`,
+  ].join('\n');
 }
 
 export function formatSlackText(payload: AlertPayload): string {

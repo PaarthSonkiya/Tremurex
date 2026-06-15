@@ -11,11 +11,14 @@ import type { DependencyRow, DiffRow } from '../db/schema.js';
 import {
   buildPayload,
   createAlertDispatcher,
+  createEmailChannel,
   createSlackChannel,
   createWebhookChannel,
+  formatEmailSubject,
+  formatEmailText,
   formatSlackText,
 } from './alerting.js';
-import type { AlertPayload } from './alerting.js';
+import type { AlertPayload, MailMessage } from './alerting.js';
 
 const ADMIN_URL =
   process.env.DATABASE_URL ?? 'postgres://tremurex:tremurex@localhost:5432/tremurex';
@@ -182,6 +185,64 @@ describe('slack channel', () => {
   });
 });
 
+describe('email channel', () => {
+  it('sends a formatted message via the transport and records it sent', async () => {
+    const { dependency, diffRow } = await fixture();
+    const sent: MailMessage[] = [];
+    const transport = {
+      sendMail: (m: MailMessage) => {
+        sent.push(m);
+        return Promise.resolve({ messageId: 'x' });
+      },
+    };
+    const dispatch = createAlertDispatcher(db, [
+      createEmailChannel({ from: 'Tremurex <a@x.test>', to: 'oncall@x.test' }, transport),
+    ]);
+    await dispatch({ dependency, diffRow, severity: 'BREAKING' });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ from: 'Tremurex <a@x.test>', to: 'oncall@x.test' });
+    expect(sent[0]?.subject).toContain('BREAKING');
+    expect(sent[0]?.subject).toContain('payments-api');
+    expect(sent[0]?.text).toContain('required-field-removed at $.id');
+
+    const history = await db.select().from(alerts);
+    expect(history[0]).toMatchObject({ channel: 'email', status: 'sent' });
+  });
+
+  it('records a failed alert when the transport throws, without throwing', async () => {
+    const { dependency, diffRow } = await fixture();
+    const transport = { sendMail: () => Promise.reject(new Error('smtp_connection_refused')) };
+    const dispatch = createAlertDispatcher(db, [
+      createEmailChannel({ from: 'a@x.test', to: 'b@x.test' }, transport),
+    ]);
+    await expect(dispatch({ dependency, diffRow, severity: 'BREAKING' })).resolves.toBeUndefined();
+
+    const history = await db.select().from(alerts);
+    expect(history[0]).toMatchObject({ channel: 'email', status: 'failed' });
+    expect(history[0]?.error).toContain('smtp_connection_refused');
+  });
+
+  it('never includes request headers or captured values in the message', async () => {
+    const { dependency, diffRow } = await fixture();
+    await db.update(dependencies).set({ headers: { authorization: 'Bearer super-secret' } });
+    const sent: MailMessage[] = [];
+    const transport = {
+      sendMail: (m: MailMessage) => {
+        sent.push(m);
+        return Promise.resolve({});
+      },
+    };
+    const dispatch = createAlertDispatcher(db, [
+      createEmailChannel({ from: 'a@x.test', to: 'b@x.test' }, transport),
+    ]);
+    await dispatch({ dependency, diffRow, severity: 'BREAKING' });
+    const blob = JSON.stringify(sent[0]);
+    expect(blob).not.toContain('super-secret');
+    expect(blob).not.toContain('authorization');
+  });
+});
+
 describe('payload formatting', () => {
   it('summarizes counts and truncates long entry lists in Slack text', async () => {
     const { dependency, diffRow } = await fixture();
@@ -195,5 +256,17 @@ describe('payload formatting', () => {
     const text = formatSlackText(many);
     expect(text).toContain('8 INFO');
     expect(text).toContain('…and 3 more');
+  });
+
+  it('lists every entry and a severity summary in email text', async () => {
+    const { dependency, diffRow } = await fixture();
+    const payload = buildPayload({ dependency, diffRow, severity: 'BREAKING' });
+
+    expect(formatEmailSubject(payload)).toBe('[Tremurex] BREAKING drift in payments-api');
+    const text = formatEmailText(payload);
+    expect(text).toContain('1 BREAKING, 1 INFO');
+    expect(text).toContain('[BREAKING] required-field-removed at $.id');
+    expect(text).toContain('[INFO] field-added at $.note');
+    expect(text).toContain(`Diff ID: ${payload.diffId}`);
   });
 });

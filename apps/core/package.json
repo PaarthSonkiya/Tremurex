@@ -17,12 +17,14 @@
     "bullmq": "^5.78.0",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.8.5",
+    "nodemailer": "^9.0.0",
     "pg": "^8.21.0",
     "undici": "^6.26.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tremurex/mock-api": "workspace:*",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.22.4"

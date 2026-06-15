@@ -158,12 +158,17 @@ requests, so the baseline locks once enough live traffic has been seen.
 ### Alerting
 
 Alerts fire for drift at or above `ALERT_THRESHOLD` (default `WARNING`; INFO drift is recorded
-to the timeline but never pushed). Configure destinations in `.env` — both optional:
+to the timeline but never pushed). Configure any combination of destinations in `.env` — all
+optional, each off until set:
 
 - `ALERT_WEBHOOK_URL` — drift alerts are POSTed there as JSON
 - `SLACK_BOT_TOKEN` + `SLACK_CHANNEL` — posts a formatted Slack message
+- `SMTP_HOST` + `ALERT_EMAIL_FROM` + `ALERT_EMAIL_TO` — emails a summary (subject + plain-text
+  body listing the classified changes). `SMTP_PORT` (default 587), `SMTP_SECURE` (`true` for the
+  implicit-TLS port 465), and `SMTP_USER`/`SMTP_PASS` (omit for relays that accept
+  unauthenticated mail) tune the connection. `ALERT_EMAIL_TO` may be a comma-separated list.
 
-Every delivery attempt (sent or failed) is recorded in alert history.
+Every delivery attempt (sent or failed), on every channel, is recorded in alert history.
 
 ### Hardening
 

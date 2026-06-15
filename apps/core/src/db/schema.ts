@@ -87,7 +87,7 @@ export const alerts = pgTable('alerts', {
   diffId: uuid('diff_id')
     .notNull()
     .references(() => diffs.id, { onDelete: 'cascade' }),
-  channel: text('channel', { enum: ['webhook', 'slack'] }).notNull(),
+  channel: text('channel', { enum: ['webhook', 'slack', 'email'] }).notNull(),
   status: text('status', { enum: ['sent', 'failed'] }).notNull(),
   error: text('error'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
