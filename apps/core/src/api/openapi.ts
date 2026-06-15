@@ -77,6 +77,19 @@ export const openApiDocument = {
               'Optional declared JSON Schema (draft 2020-12) to diff captures against instead of a learned baseline (conformance checking). REST only; must be self-contained ($ref is not resolved).',
             additionalProperties: true,
           },
+          openapi: {
+            type: 'object',
+            description:
+              'Alternative to `contract`: derive it from an inline OpenAPI document. The spec is never fetched over the network.',
+            required: ['document', 'path'],
+            properties: {
+              document: { type: 'object', additionalProperties: true },
+              path: { type: 'string' },
+              method: { type: 'string' },
+              status: { type: 'string' },
+              contentType: { type: 'string' },
+            },
+          },
         },
       },
       Dependency: {

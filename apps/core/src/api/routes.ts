@@ -9,6 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import type { JsonSchema, JsonValue } from '@tremurex/shared';
 import { redactHeaders } from '../capture/redact.js';
 import { jsonDepthExceeds, maxJsonDepth } from '../capture/depth.js';
+import { ContractExtractionError, extractContract } from '../contract/openapi-extract.js';
 import { BlockedUrlError, assertPublicUrlSync, ssrfOptionsFromEnv } from '../capture/ssrf.js';
 import type { Db } from '../db/client.js';
 import { alerts, baselines, dependencies, diffs, samples } from '../db/schema.js';
@@ -65,18 +66,43 @@ const RegisterDependency = z
       .record(z.string(), z.unknown())
       .refine((s) => Object.keys(s).length > 0, { error: 'contract must be a non-empty object' })
       .optional(),
+    /**
+     * Derive the contract from an OpenAPI document instead of supplying the
+     * schema directly. The document is inline (never fetched, §7.1); `path`
+     * (and optional method/status/contentType) select the response schema.
+     */
+    openapi: z
+      .object({
+        document: z.record(z.string(), z.unknown()),
+        path: z.string().min(1),
+        method: z.string().optional(),
+        status: z.string().optional(),
+        contentType: z.string().optional(),
+      })
+      .optional(),
   })
   .refine((d) => !(d.kind === 'mcp' && d.captureMode === 'proxy'), {
     error: 'MCP dependencies are polled, not proxy-captured',
     path: ['captureMode'],
   })
-  .refine((d) => !(d.contract !== undefined && d.kind === 'mcp'), {
+  .refine((d) => !(d.contract !== undefined && d.openapi !== undefined), {
+    error: 'provide either contract or openapi, not both',
+    path: ['openapi'],
+  })
+  .refine((d) => !((d.contract !== undefined || d.openapi !== undefined) && d.kind === 'mcp'), {
     error: 'a contract is for REST dependencies only',
     path: ['contract'],
   })
   .refine(
     (d) => !(d.contract !== undefined && jsonDepthExceeds(d.contract as JsonValue, maxJsonDepth())),
     { error: 'contract nests too deeply', path: ['contract'] },
+  )
+  .refine(
+    (d) =>
+      !(
+        d.openapi !== undefined && jsonDepthExceeds(d.openapi.document as JsonValue, maxJsonDepth())
+      ),
+    { error: 'openapi document nests too deeply', path: ['openapi'] },
   );
 
 /**
@@ -130,12 +156,30 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
       throw err;
     }
     // A declared contract becomes the baseline directly; it needs the locking
-    // handler to be wired. `contract` maps to the contract_schema column.
-    const { contract, ...fields } = parsed.data;
-    if (contract && !lockContract) {
+    // handler to be wired. It comes either as a raw schema (`contract`) or
+    // derived from an inline OpenAPI document (`openapi`). Maps to contract_schema.
+    const { contract, openapi, ...fields } = parsed.data;
+    let contractSchema: JsonSchema | undefined;
+    if (contract) {
+      contractSchema = contract;
+    } else if (openapi) {
+      try {
+        contractSchema = extractContract(openapi.document, {
+          path: openapi.path,
+          ...(openapi.method !== undefined ? { method: openapi.method } : {}),
+          ...(openapi.status !== undefined ? { status: openapi.status } : {}),
+          ...(openapi.contentType !== undefined ? { contentType: openapi.contentType } : {}),
+        });
+      } catch (err) {
+        if (err instanceof ContractExtractionError) {
+          return reply.status(400).send({ error: 'invalid-openapi', reason: err.message });
+        }
+        throw err;
+      }
+    }
+    if (contractSchema && !lockContract) {
       return reply.status(501).send({ error: 'contract-not-supported' });
     }
-    const contractSchema = contract as unknown as JsonSchema | undefined;
     const values = {
       ...fields,
       baselineWindow: fields.baselineWindow ?? (fields.kind === 'mcp' ? 1 : 5),

@@ -104,9 +104,33 @@ curl -X POST http://localhost:4000/dependencies \
   }'
 ```
 
-The contract must be a self-contained schema — `$ref` is not resolved. `POST
-/dependencies/:id/rebaseline` re-asserts the contract and clears open drift (it does not relearn
-from samples). The web register form has an optional "Contract" field for the same thing.
+`POST /dependencies/:id/rebaseline` re-asserts the contract and clears open drift (it does not
+relearn from samples). The web register form has an optional "Contract" field for the same thing.
+
+**From an OpenAPI spec.** Rather than hand-writing the schema, pass an OpenAPI document inline and
+point at a response — Tremurex extracts and dereferences the schema for you (it never fetches the
+spec over the network):
+
+```sh
+curl -X POST http://localhost:4000/dependencies \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "orders-api",
+    "url": "https://api.example.com/v1/orders/42",
+    "openapi": {
+      "document": { "openapi": "3.0.3", "paths": { "/orders/{id}": { "get": { "responses": {
+        "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } } } } } } },
+        "components": { "schemas": { "Order": { "type": "object", "properties": { "id": { "type": "integer" } }, "required": ["id"] } } } },
+      "path": "/orders/{id}"
+    }
+  }'
+```
+
+`openapi` takes `document` plus a `path` (and optional `method` defaulting to GET, `status`
+defaulting to the lowest 2xx, and `contentType` defaulting to `application/json`). The extractor
+resolves internal `$ref`s, folds `nullable: true` into the type, merges `allOf`, and treats
+`oneOf` as `anyOf`. The resulting contract — like a hand-written one — must be self-contained:
+external `$ref`s are rejected and circular `$ref`s error.
 
 ### Managing dependencies
 

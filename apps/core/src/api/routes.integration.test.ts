@@ -732,6 +732,64 @@ describe('POST /dependencies with a declared contract', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('derives and locks a contract from an inline OpenAPI document', async () => {
+    const expected = { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] };
+    const res = await contractApp.inject({
+      method: 'POST',
+      url: '/dependencies',
+      payload: {
+        name: 'openapi-dep',
+        url: 'https://api.test/orders/1',
+        openapi: {
+          document: {
+            openapi: '3.0.0',
+            paths: {
+              '/orders/{id}': {
+                get: {
+                  responses: { '200': { content: { 'application/json': { schema: expected } } } },
+                },
+              },
+            },
+          },
+          path: '/orders/{id}',
+        },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const dep = res.json<{ id: string; contractSchema: unknown }>();
+    expect(dep.contractSchema).toEqual(expected);
+    const bl = await db.select().from(baselines).where(eq(baselines.dependencyId, dep.id));
+    expect(bl[0]?.schema).toEqual(expected);
+  });
+
+  it('returns 400 invalid-openapi when the selector matches nothing', async () => {
+    const res = await contractApp.inject({
+      method: 'POST',
+      url: '/dependencies',
+      payload: {
+        name: 'bad-openapi',
+        url: 'https://api.test/x',
+        openapi: { document: { openapi: '3.0.0', paths: {} }, path: '/missing' },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toBe('invalid-openapi');
+  });
+
+  it('rejects supplying both contract and openapi with 400', async () => {
+    const res = await contractApp.inject({
+      method: 'POST',
+      url: '/dependencies',
+      payload: {
+        name: 'both',
+        url: 'https://api.test/x',
+        contract: { type: 'object' },
+        openapi: { document: { paths: {} }, path: '/x' },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('returns 501 when contract locking is not wired (default app)', async () => {
     // `app` (the shared instance) has no lockContract handler.
     const res = await app.inject({
