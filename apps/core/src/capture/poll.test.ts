@@ -28,6 +28,12 @@ beforeAll(async () => {
       res.write('{"blob":"');
       for (let i = 0; i < 64; i++) res.write('x'.repeat(1024));
       res.end('"}');
+    } else if (req.url === '/deep') {
+      // Valid JSON, modest size, but nested far past any sane depth — would
+      // overflow the recursive redactor if it were not rejected first.
+      const levels = 5000;
+      res.setHeader('content-type', 'application/json');
+      res.end('['.repeat(levels) + '1' + ']'.repeat(levels));
     } else {
       res.statusCode = 500;
       res.end('boom');
@@ -95,6 +101,12 @@ describe('pollEndpoint', () => {
     } finally {
       process.env.TREMUREX_MAX_RESPONSE_BYTES = prev;
     }
+  });
+
+  it('rejects pathologically deep JSON before it can overflow the redactor', async () => {
+    await expect(
+      pollEndpoint({ url: `${baseUrl}/deep`, method: 'GET', headers: {} }),
+    ).rejects.toMatchObject({ kind: 'too-deep' });
   });
 
   it('refuses to poll a cloud-metadata address (SSRF guard)', async () => {

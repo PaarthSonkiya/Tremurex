@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { JsonValue } from '@tremurex/shared';
 import { redactHeaders } from '../capture/redact.js';
+import { jsonDepthExceeds, maxJsonDepth } from '../capture/depth.js';
 import { BlockedUrlError, assertPublicUrlSync, ssrfOptionsFromEnv } from '../capture/ssrf.js';
 import type { Db } from '../db/client.js';
 import { alerts, baselines, dependencies, diffs, samples } from '../db/schema.js';
@@ -401,6 +402,11 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
       if (!dependency) {
         // Not monitored — a no-op, not an error (the proxy sees lots of traffic).
         return reply.status(202).send({ matched: false });
+      }
+      // Same untrusted-JSON depth guard as the poller: reject before the
+      // recursive redactor/diff walker would overflow the stack on it.
+      if (jsonDepthExceeds(parsed.data.body as JsonValue, maxJsonDepth())) {
+        return reply.status(413).send({ error: 'too-deeply-nested' });
       }
       const result = await processCapture(dependency.id, parsed.data.body as JsonValue);
       return reply.status(202).send({

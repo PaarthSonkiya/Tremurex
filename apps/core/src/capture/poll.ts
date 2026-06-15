@@ -9,13 +9,14 @@ import type { LookupFunction } from 'node:net';
 import type { JsonValue } from '@tremurex/shared';
 import type { DependencyRow } from '../db/schema.js';
 import { redactSecrets } from './redact.js';
+import { jsonDepthExceeds, maxJsonDepth } from './depth.js';
 import { BlockedUrlError, resolveAllowed, ssrfOptionsFromEnv } from './ssrf.js';
 import type { ResolvedAddress } from './ssrf.js';
 
 export class CaptureError extends Error {
   constructor(
     message: string,
-    readonly kind: 'http-status' | 'not-json' | 'network' | 'too-large' | 'blocked',
+    readonly kind: 'http-status' | 'not-json' | 'network' | 'too-large' | 'too-deep' | 'blocked',
     options?: ErrorOptions,
   ) {
     super(message, options);
@@ -160,6 +161,12 @@ export const pollEndpoint: FetchBody = async (dependency) => {
     parsed = JSON.parse(text) as JsonValue;
   } catch (err) {
     throw new CaptureError(`${dependency.url} did not return JSON`, 'not-json', { cause: err });
+  }
+
+  // Reject pathologically nested JSON before the recursive redactor/diff walker
+  // would overflow the stack on it (a DoS lever for an untrusted endpoint).
+  if (jsonDepthExceeds(parsed, maxJsonDepth())) {
+    throw new CaptureError(`${dependency.url} response nests too deeply`, 'too-deep');
   }
 
   return redactSecrets(parsed);

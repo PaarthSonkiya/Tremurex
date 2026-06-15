@@ -405,6 +405,24 @@ describe('proxy capture routes (Phase 3)', () => {
     expect(res.statusCode).toBe(400);
     expect(captured).toHaveLength(0);
   });
+
+  it('POST /ingest rejects a pathologically deep body with 413 (before the pipeline)', async () => {
+    await db
+      .insert(dependencies)
+      .values({ name: 'pd', captureMode: 'proxy', url: 'https://api.acme.test/v1/deep' })
+      .returning();
+    let deep: unknown = 1;
+    for (let i = 0; i < 300; i++) deep = { a: deep };
+
+    const res = await proxyApp.inject({
+      method: 'POST',
+      url: '/ingest',
+      payload: { url: 'https://api.acme.test/v1/deep', body: deep },
+    });
+    expect(res.statusCode).toBe(413);
+    expect(res.json<{ error: string }>().error).toBe('too-deeply-nested');
+    expect(captured).toHaveLength(0); // never reached the recursive redactor
+  });
 });
 
 describe('PATCH /dependencies/:id', () => {
