@@ -69,6 +69,12 @@ def test_infer_rejects_missing_samples() -> None:
     assert response.status_code == 422
 
 
+def test_infer_rejects_too_many_samples() -> None:
+    """Bound genson work per request (DoS guard)."""
+    response = client.post("/infer", json={"samples": [{} for _ in range(1001)]})
+    assert response.status_code == 422
+
+
 def test_infer_accepts_non_object_samples() -> None:
     """Top-level scalars/arrays are legal JSON responses too."""
     response = client.post("/infer", json={"samples": [[1, 2], [3]]})
