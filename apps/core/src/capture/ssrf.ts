@@ -109,19 +109,44 @@ export function assertPublicUrlSync(rawUrl: string, opts: SsrfOptions = {}): voi
   }
 }
 
+/** A resolved, SSRF-vetted address to pin an outbound connection to. */
+export interface ResolvedAddress {
+  address: string;
+  /** 4 or 6 — the IP family, as dns.lookup / net expect it. */
+  family: number;
+}
+
 /**
- * Full gate: resolves the host and rejects if ANY answer is blocked. Use at the
- * actual outbound (poll time), which also narrows the DNS-rebinding window.
+ * Full gate: resolves the host, rejects if ANY answer is blocked, and returns
+ * the vetted addresses. Callers must connect to *these* and never re-resolve —
+ * a second lookup at connect time could land on a blocked IP this check never
+ * saw (DNS rebinding). See pinnedLookup in poll.ts.
  */
-export async function assertUrlAllowed(rawUrl: string, opts: SsrfOptions = {}): Promise<void> {
+export async function resolveAllowed(
+  rawUrl: string,
+  opts: SsrfOptions = {},
+): Promise<ResolvedAddress[]> {
   const url = parseUrl(rawUrl);
-  const host = url.hostname.replace(/^\[|\]$/g, '');
-  const addresses = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
-  for (const ip of addresses) {
-    if (isBlockedIp(ip, opts)) {
-      throw new BlockedUrlError(`blocked-address:${ip}`);
+  const host = url.hostname.replace(/^\[|\]$/g, ''); // strip IPv6 brackets
+  const literal = isIP(host);
+  const addresses: ResolvedAddress[] = literal
+    ? [{ address: host, family: literal }]
+    : (await lookup(host, { all: true })).map((a) => ({ address: a.address, family: a.family }));
+  for (const { address } of addresses) {
+    if (isBlockedIp(address, opts)) {
+      throw new BlockedUrlError(`blocked-address:${address}`);
     }
   }
+  return addresses;
+}
+
+/**
+ * Full gate without the resolved addresses — for callers that can't pin the
+ * connection (e.g. the MCP transport drives its own fetch). Prefer
+ * resolveAllowed + pinning where the connector is controllable.
+ */
+export async function assertUrlAllowed(rawUrl: string, opts: SsrfOptions = {}): Promise<void> {
+  await resolveAllowed(rawUrl, opts);
 }
 
 /** Reads the operator's strictness preference at call time (env-configurable). */

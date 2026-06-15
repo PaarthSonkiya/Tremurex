@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { CaptureError, pollEndpoint } from './poll.js';
+import { CaptureError, pinnedLookup, pollEndpoint } from './poll.js';
+import type { ResolvedAddress } from './ssrf.js';
 
 let server: http.Server;
 let baseUrl: string;
@@ -112,5 +113,41 @@ describe('pollEndpoint', () => {
     await promise.catch((err: unknown) => {
       expect(JSON.stringify(err instanceof Error ? err.message : '')).not.toContain('super-secret');
     });
+  });
+});
+
+describe('pinnedLookup (DNS-rebinding guard)', () => {
+  const vetted: ResolvedAddress[] = [
+    { address: '93.184.216.34', family: 4 },
+    { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 },
+  ];
+
+  /** Invoke the lookup the way undici's connector does and capture its args. */
+  function callLookup(all: boolean): Promise<unknown[]> {
+    return new Promise((resolve) => {
+      // The hostname is deliberately a value we never want connected to — the
+      // whole point is that it is ignored in favour of the vetted addresses.
+      pinnedLookup(vetted)('169.254.169.254', { all }, (...args: unknown[]) => {
+        resolve(args);
+      });
+    });
+  }
+
+  it('ignores the hostname and returns the first vetted address (all: false)', async () => {
+    expect(await callLookup(false)).toEqual([null, '93.184.216.34', 4]);
+  });
+
+  it('returns every vetted address (all: true)', async () => {
+    expect(await callLookup(true)).toEqual([null, vetted]);
+  });
+
+  it('fails closed with an error when there are no vetted addresses', async () => {
+    const [err, address] = await new Promise<unknown[]>((resolve) => {
+      pinnedLookup([])('example.com', { all: false }, (...args: unknown[]) => {
+        resolve(args);
+      });
+    });
+    expect(err).toBeInstanceOf(Error);
+    expect(address).toBe('');
   });
 });

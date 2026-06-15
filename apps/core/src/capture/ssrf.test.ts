@@ -4,6 +4,7 @@ import {
   assertPublicUrlSync,
   assertUrlAllowed,
   isBlockedIp,
+  resolveAllowed,
   ssrfOptionsFromEnv,
 } from './ssrf.js';
 
@@ -108,6 +109,31 @@ describe('assertUrlAllowed', () => {
 
   it('allows a public hostname', async () => {
     await expect(assertUrlAllowed('https://example.com/')).resolves.toBeUndefined();
+  });
+});
+
+describe('resolveAllowed', () => {
+  it('returns a literal IPv4 with its family, without a DNS lookup', async () => {
+    await expect(resolveAllowed('http://127.0.0.1:8080/api')).resolves.toEqual([
+      { address: '127.0.0.1', family: 4 },
+    ]);
+  });
+
+  it('returns a bracketed literal IPv6 stripped of its brackets, family 6', async () => {
+    await expect(resolveAllowed('http://[::1]/')).resolves.toEqual([{ address: '::1', family: 6 }]);
+  });
+
+  it('throws BlockedUrlError for a metadata address before returning anything', async () => {
+    await expect(resolveAllowed('http://169.254.169.254/')).rejects.toBeInstanceOf(BlockedUrlError);
+  });
+
+  it('resolves a hostname to at least one vetted address', async () => {
+    const addresses = await resolveAllowed('http://localhost/');
+    expect(addresses.length).toBeGreaterThan(0);
+    for (const a of addresses) {
+      expect([4, 6]).toContain(a.family);
+      expect(typeof a.address).toBe('string');
+    }
   });
 });
 

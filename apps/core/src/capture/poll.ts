@@ -3,12 +3,14 @@
  * monitored endpoints). Fetches one response body and redacts it before it
  * touches anything else.
  */
-import { request } from 'undici';
+import { Agent, request } from 'undici';
 import type { Dispatcher } from 'undici';
+import type { LookupFunction } from 'node:net';
 import type { JsonValue } from '@tremurex/shared';
 import type { DependencyRow } from '../db/schema.js';
 import { redactSecrets } from './redact.js';
-import { BlockedUrlError, assertUrlAllowed, ssrfOptionsFromEnv } from './ssrf.js';
+import { BlockedUrlError, resolveAllowed, ssrfOptionsFromEnv } from './ssrf.js';
+import type { ResolvedAddress } from './ssrf.js';
 
 export class CaptureError extends Error {
   constructor(
@@ -68,13 +70,37 @@ async function readCapped(
   return Buffer.concat(chunks).toString('utf8');
 }
 
+/**
+ * A DNS lookup that ignores the hostname and always yields the pre-vetted
+ * addresses. Handed to undici's connector so the socket connects ONLY to IPs
+ * the SSRF guard already approved — there is no second, unchecked resolution to
+ * rebind. TLS servername still comes from the URL host, so cert validation is
+ * unaffected.
+ */
+export function pinnedLookup(addresses: readonly ResolvedAddress[]): LookupFunction {
+  return (_hostname, options, callback) => {
+    const first = addresses[0];
+    if (!first) {
+      // resolveAllowed never returns empty, but fail closed rather than connect.
+      callback(new Error('no vetted address to connect to'), '', 0);
+      return;
+    }
+    if (options.all) {
+      callback(null, addresses as ResolvedAddress[]);
+    } else {
+      callback(null, first.address, first.family);
+    }
+  };
+}
+
 export const pollEndpoint: FetchBody = async (dependency) => {
   const limit = maxResponseBytes();
   // SSRF gate: resolve and vet the destination before we open a connection.
   // Done here (the real outbound) so a rebinding/late-changed DNS record is
   // caught at poll time, not just at registration.
+  let addresses: ResolvedAddress[];
   try {
-    await assertUrlAllowed(dependency.url, ssrfOptionsFromEnv());
+    addresses = await resolveAllowed(dependency.url, ssrfOptionsFromEnv());
   } catch (err) {
     if (err instanceof BlockedUrlError) {
       throw new CaptureError(`Refusing to poll ${dependency.url}: ${err.reason}`, 'blocked');
@@ -83,6 +109,10 @@ export const pollEndpoint: FetchBody = async (dependency) => {
     throw new CaptureError(`Request to ${dependency.url} failed`, 'network', { cause: err });
   }
 
+  // Pin the connection to the vetted IPs so undici cannot re-resolve to a
+  // blocked address between the check above and the actual connect.
+  const dispatcher = new Agent({ connect: { lookup: pinnedLookup(addresses) } });
+
   let text: string;
   try {
     const res = await request(dependency.url, {
@@ -90,6 +120,7 @@ export const pollEndpoint: FetchBody = async (dependency) => {
       headers: dependency.headers,
       headersTimeout: 15_000,
       bodyTimeout: 15_000,
+      dispatcher,
     });
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -119,6 +150,9 @@ export const pollEndpoint: FetchBody = async (dependency) => {
     }
     // Never include headers in errors/logs — they may carry credentials.
     throw new CaptureError(`Request to ${dependency.url} failed`, 'network', { cause: err });
+  } finally {
+    // Fire-and-forget teardown; the body is already fully read by here.
+    dispatcher.close().catch(() => {});
   }
 
   let parsed: JsonValue;
