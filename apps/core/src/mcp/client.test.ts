@@ -54,6 +54,15 @@ describe('fetchToolCatalog', () => {
     mock.setTools([]); // reset not needed for other tests, but keep state tidy
   });
 
+  it('refuses to reach a cloud-metadata address (SSRF guard)', async () => {
+    const err = await fetchToolCatalog({
+      url: 'http://169.254.169.254/mcp',
+      headers: {},
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CaptureError);
+    expect((err as CaptureError).kind).toBe('blocked');
+  });
+
   it('wraps lifecycle failures in CaptureError without leaking headers', async () => {
     const err = await fetchToolCatalog({
       url: 'http://127.0.0.1:9/mcp',

@@ -16,6 +16,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { JsonSchema } from '@tremurex/shared';
 import { CaptureError } from '../capture/poll.js';
+import { BlockedUrlError, assertUrlAllowed, ssrfOptionsFromEnv } from '../capture/ssrf.js';
 import type { DependencyRow } from '../db/schema.js';
 import type { ToolCatalog, ToolDefinition } from './catalog-diff.js';
 
@@ -24,6 +25,20 @@ export type FetchCatalog = (
 ) => Promise<ToolCatalog>;
 
 export const fetchToolCatalog: FetchCatalog = async (dependency) => {
+  // SSRF gate: vet the resolved destination before opening the MCP transport,
+  // mirroring the REST poller so all outbound capture is uniformly guarded.
+  try {
+    await assertUrlAllowed(dependency.url, ssrfOptionsFromEnv());
+  } catch (err) {
+    if (err instanceof BlockedUrlError) {
+      throw new CaptureError(`Refusing to reach ${dependency.url}: ${err.reason}`, 'blocked');
+    }
+    // DNS failure etc. — a genuine transport problem (headers never leak).
+    throw new CaptureError(`MCP lifecycle against ${dependency.url} failed`, 'network', {
+      cause: err,
+    });
+  }
+
   const client = new Client({ name: 'tremurex', version: '0.0.0' });
   const transport = new StreamableHTTPClientTransport(new URL(dependency.url), {
     requestInit: { headers: dependency.headers },
