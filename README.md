@@ -174,7 +174,8 @@ Sensible defaults that you can tighten in `.env` (see `.env.example`):
 - **SSRF guard** — link-local / cloud-metadata addresses (`169.254.0.0/16`, `fe80::/10`, IMDSv6)
   are **always** refused, at both registration and poll time. Private/loopback ranges stay
   allowed so you can monitor internal APIs; set `TREMUREX_BLOCK_PRIVATE_IPS=true` to block those
-  too.
+  too. Both the REST poller and the MCP client connect only to the exact IP the guard vetted
+  (no second DNS lookup), so a host can't rebind to a blocked address between check and connect.
 - **API auth (optional)** — set `TREMUREX_API_TOKEN` (≥16 chars) to require
   `Authorization: Bearer <token>` on every route except `/health`. The CLI reads the same
   variable; the web UI reads `VITE_API_TOKEN` at build time. Unset = no auth (the zero-config
