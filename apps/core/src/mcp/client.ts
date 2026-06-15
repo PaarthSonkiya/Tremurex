@@ -11,12 +11,15 @@
  * a catalog is schema metadata — parameter names like `apiKey` are shape,
  * not secret values, and redaction would corrupt them.
  */
+import { Agent, fetch as undiciFetch } from 'undici';
+import type { RequestInit as UndiciRequestInit } from 'undici';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { JsonSchema } from '@tremurex/shared';
-import { CaptureError } from '../capture/poll.js';
-import { BlockedUrlError, assertUrlAllowed, ssrfOptionsFromEnv } from '../capture/ssrf.js';
+import { CaptureError, pinnedLookup } from '../capture/poll.js';
+import { BlockedUrlError, resolveAllowed, ssrfOptionsFromEnv } from '../capture/ssrf.js';
+import type { ResolvedAddress } from '../capture/ssrf.js';
 import type { DependencyRow } from '../db/schema.js';
 import type { ToolCatalog, ToolDefinition } from './catalog-diff.js';
 
@@ -27,8 +30,9 @@ export type FetchCatalog = (
 export const fetchToolCatalog: FetchCatalog = async (dependency) => {
   // SSRF gate: vet the resolved destination before opening the MCP transport,
   // mirroring the REST poller so all outbound capture is uniformly guarded.
+  let addresses: ResolvedAddress[];
   try {
-    await assertUrlAllowed(dependency.url, ssrfOptionsFromEnv());
+    addresses = await resolveAllowed(dependency.url, ssrfOptionsFromEnv());
   } catch (err) {
     if (err instanceof BlockedUrlError) {
       throw new CaptureError(`Refusing to reach ${dependency.url}: ${err.reason}`, 'blocked');
@@ -39,9 +43,24 @@ export const fetchToolCatalog: FetchCatalog = async (dependency) => {
     });
   }
 
+  // Pin every transport request (initialize, tools/list pages, the SSE stream)
+  // to the vetted IPs so the SDK's fetch cannot re-resolve to a blocked address
+  // — same DNS-rebinding guard as the REST poller.
+  const dispatcher = new Agent({ connect: { lookup: pinnedLookup(addresses) } });
+  // Use undici's own fetch (not the global) so it and the Agent come from the
+  // same undici instance — a dispatcher from the userland package is rejected by
+  // Node's embedded undici. Casts bridge undici's fetch types and the SDK's
+  // DOM-typed FetchLike; both are WHATWG-compatible at runtime.
+  const pinnedFetch: FetchLike = (url, init) =>
+    undiciFetch(url, {
+      ...(init as unknown as UndiciRequestInit),
+      dispatcher,
+    }) as unknown as Promise<Response>;
+
   const client = new Client({ name: 'tremurex', version: '0.0.0' });
   const transport = new StreamableHTTPClientTransport(new URL(dependency.url), {
     requestInit: { headers: dependency.headers },
+    fetch: pinnedFetch,
   });
 
   try {
@@ -71,5 +90,6 @@ export const fetchToolCatalog: FetchCatalog = async (dependency) => {
     });
   } finally {
     await client.close().catch(() => undefined);
+    await dispatcher.close().catch(() => undefined);
   }
 };
