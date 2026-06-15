@@ -1,0 +1,55 @@
+name: 'Tremurex drift gate'
+description: >-
+  Fail the build when a monitored API or MCP dependency has drifted at or above a
+  severity threshold. Talks to a running Tremurex core (Phase 4 CI integration).
+author: 'Tremurex'
+branding:
+  icon: 'activity'
+  color: 'orange'
+
+inputs:
+  core-url:
+    description: 'Base URL of the running Tremurex core.'
+    required: false
+    default: 'http://localhost:4000'
+  threshold:
+    description: 'Minimum severity that fails the build: BREAKING | WARNING | INFO.'
+    required: false
+    default: 'BREAKING'
+  refresh:
+    description: 'Poll every pollable dependency once before checking (live state).'
+    required: false
+    default: 'true'
+  json:
+    description: 'Emit machine-readable JSON output.'
+    required: false
+    default: 'false'
+  api-token:
+    description: 'Bearer token, if core has TREMUREX_API_TOKEN enabled.'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: pnpm/action-setup@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 22
+    - name: Build the tremurex CLI
+      shell: bash
+      working-directory: ${{ github.action_path }}/../../..
+      run: |
+        pnpm install --frozen-lockfile
+        pnpm --filter @tremurex/cli build
+    - name: Check dependencies for drift
+      shell: bash
+      working-directory: ${{ github.action_path }}/../../..
+      env:
+        TREMUREX_CORE_URL: ${{ inputs.core-url }}
+        TREMUREX_API_TOKEN: ${{ inputs.api-token }}
+      run: |
+        args=(check --threshold "${{ inputs.threshold }}")
+        [ "${{ inputs.refresh }}" = "true" ] && args+=(--refresh)
+        [ "${{ inputs.json }}" = "true" ] && args+=(--json)
+        node apps/cli/dist/cli.js "${args[@]}"
