@@ -1,5 +1,5 @@
 # Build context: repo root (workspace deps need the monorepo).
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 RUN corepack enable
 WORKDIR /repo
 
