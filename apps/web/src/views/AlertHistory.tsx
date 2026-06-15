@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchAlerts } from '../api.js';
 import { formatInstant } from '../format.js';
+import { Dot } from '../ui.js';
 
 export function AlertHistory({ depId }: { depId: string }) {
   const { data } = useQuery({
@@ -16,16 +17,16 @@ export function AlertHistory({ depId }: { depId: string }) {
 
   return (
     <section className="alert-history">
-      <p className="microlabel">Alert deliveries</p>
+      <p className="eyebrow" style={{ marginBottom: '0.75rem' }}>
+        Alert deliveries<span className="count">{data.length}</span>
+      </p>
       <div className="panel">
         {data.map((a) => (
-          <div key={a.id} className="row alert">
-            <span>
-              <span className={`badge ${a.status === 'sent' ? 'monitoring' : 'BREAKING'}`}>
-                {a.status}
-              </span>{' '}
-              {a.channel}
-              {a.error && <span className="url"> — {a.error}</span>}
+          <div key={a.id} className="alert-row">
+            <span className="lead">
+              <Dot tone={a.status === 'sent' ? 'ok' : 'BREAKING'} />
+              <span className="channel">{a.channel}</span>
+              {a.error && <span className="err">— {a.error}</span>}
             </span>
             <span className="when">{formatInstant(a.createdAt)}</span>
           </div>

@@ -3,6 +3,13 @@
 const API_URL: string =
   (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 
+// Sent only when core has API auth enabled (build-time config).
+const API_TOKEN = import.meta.env.VITE_API_TOKEN as string | undefined;
+
+function authHeaders(): Record<string, string> {
+  return API_TOKEN ? { authorization: `Bearer ${API_TOKEN}` } : {};
+}
+
 export type Severity = 'BREAKING' | 'WARNING' | 'INFO';
 
 export interface DiffEntry {
@@ -96,7 +103,7 @@ export interface DiffDetail {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`);
+  const res = await fetch(`${API_URL}${path}`, { headers: authHeaders() });
   if (!res.ok) {
     throw new Error(`${path} → HTTP ${String(res.status)}`);
   }
@@ -107,8 +114,11 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
   const res = await fetch(`${API_URL}${path}`, {
     method,
     ...(body === undefined
-      ? {}
-      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+      ? { headers: authHeaders() }
+      : {
+          headers: { 'content-type': 'application/json', ...authHeaders() },
+          body: JSON.stringify(body),
+        }),
   });
   if (!res.ok) {
     // Surface the API's validation message when there is one.

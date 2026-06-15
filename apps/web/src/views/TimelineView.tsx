@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchTimeline } from '../api.js';
 import { formatInstant } from '../format.js';
+import { Chip, Dot, EmptyState, ErrorNote, Loading } from '../ui.js';
 import { AlertHistory } from './AlertHistory.js';
 import { DependencyActions } from './DependencyActions.js';
 import { EditForm } from './EditForm.js';
@@ -25,23 +26,34 @@ export function TimelineView({
   return (
     <section>
       <button type="button" className="backlink" onClick={onBack}>
-        ← all dependencies
+        <span className="arrow">←</span> All dependencies
       </button>
-      {isPending && <p className="status-note">Loading timeline…</p>}
-      {error && <p className="status-note error">Failed to load: {error.message}</p>}
+      {isPending && <Loading label="Reading timeline…" />}
+      {error && <ErrorNote message={`Couldn't load this timeline — ${error.message}`} />}
       {data && (
         <>
           <div className="timeline-head">
             <h2>{data.dependency.name}</h2>
-            <p className="url">
-              {data.dependency.kind === 'mcp' ? 'MCP' : data.dependency.method}{' '}
+            <p className="endpoint">
+              <span className="verb">
+                {data.dependency.kind === 'mcp' ? 'MCP' : data.dependency.method}
+              </span>{' '}
               {data.dependency.url}
             </p>
-            <p className="microlabel">
-              <span className={`badge ${data.status}`}>{data.status}</span>{' '}
-              {!data.dependency.enabled && <span className="badge paused">paused</span>}{' '}
-              {data.status === 'baselining' &&
-                `${String(data.samplesCollected)}/${String(data.dependency.baselineWindow)} samples collected`}
+            <p className="statusline">
+              <Dot
+                tone={data.status === 'baselining' ? 'muted' : 'ok'}
+                live={data.status === 'baselining'}
+              />
+              <Chip tone={data.status === 'baselining' ? 'muted' : 'ok'}>{data.status}</Chip>
+              {!data.dependency.enabled && (
+                <span className="chip muted outline-dashed">paused</span>
+              )}
+              {data.status === 'baselining' && (
+                <span>
+                  {data.samplesCollected} of {data.dependency.baselineWindow} samples collected
+                </span>
+              )}
             </p>
             <DependencyActions
               dependency={data.dependency}
@@ -60,41 +72,60 @@ export function TimelineView({
               }}
             />
           )}
+
           {data.events.length === 0 ? (
-            <p className="status-note">No events yet — still collecting baseline samples.</p>
+            <EmptyState
+              title="No drift recorded"
+              hint="Tremurex is still collecting baseline samples. Events appear here once it locks a baseline."
+            />
           ) : (
-            <div className="panel">
+            <div className="trace">
               {data.events.map((event) =>
                 event.type === 'drift' ? (
-                  <button
-                    key={event.id}
-                    type="button"
-                    className={`row event ${event.severity}`}
-                    onClick={() => {
-                      onSelectDiff(event.id);
-                    }}
-                  >
-                    <span>
-                      <span className={`badge ${event.severity}`}>{event.severity}</span> drift ·{' '}
-                      {event.entryCount} change{event.entryCount === 1 ? '' : 's'}{' '}
-                      {event.resolvedAt === null ? (
-                        <span className="badge active">active</span>
-                      ) : (
-                        <span className="badge resolved">resolved</span>
-                      )}
-                    </span>
-                    <span className="when">
-                      {formatInstant(event.at)}
-                      {event.lastSeenAt !== event.at && (
-                        <> · last seen {formatInstant(event.lastSeenAt)}</>
-                      )}
-                    </span>
-                  </button>
+                  <article key={event.id} className={`tick ${event.severity}`}>
+                    <span className="node" />
+                    <button
+                      type="button"
+                      className="tick-card"
+                      onClick={() => {
+                        onSelectDiff(event.id);
+                      }}
+                    >
+                      <span className="summary">
+                        <Chip tone={event.severity}>{event.severity}</Chip>
+                        <span className="changes">
+                          {event.entryCount} change{event.entryCount === 1 ? '' : 's'}
+                        </span>
+                        {event.resolvedAt === null ? (
+                          <Chip tone={event.severity}>open</Chip>
+                        ) : (
+                          <span className="chip muted outline-dashed">resolved</span>
+                        )}
+                      </span>
+                      <span className="when">
+                        {formatInstant(event.at)}
+                        {event.lastSeenAt !== event.at && (
+                          <>
+                            {' '}
+                            <span className="faint">
+                              · last seen {formatInstant(event.lastSeenAt)}
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    </button>
+                  </article>
                 ) : (
-                  <div key={event.id} className="row event locked">
-                    <span>baseline locked · {event.sampleCount} samples</span>
-                    <span className="when">{formatInstant(event.at)}</span>
-                  </div>
+                  <article key={event.id} className="tick locked">
+                    <span className="node" />
+                    <div className="tick-card static">
+                      <span className="summary">
+                        <span className="changes">Baseline locked</span>
+                        <span className="chip muted">{event.sampleCount} samples</span>
+                      </span>
+                      <span className="when">{formatInstant(event.at)}</span>
+                    </div>
+                  </article>
                 ),
               )}
             </div>
