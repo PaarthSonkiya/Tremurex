@@ -1,9 +1,11 @@
+import { request } from 'undici';
 import {
   createAlertDispatcher,
   createSlackChannel,
   createSlackClient,
   createWebhookChannel,
 } from './alerting/alerting.js';
+import type { ReadinessCheck } from './app.js';
 import type { AlertChannel } from './alerting/alerting.js';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
@@ -43,13 +45,53 @@ const pipeline = createPipeline({
 });
 
 const queue = createPollingQueue(config.REDIS_URL);
-const app = await buildApp({
-  db,
-  syncSchedule: (dependency) => syncDependencySchedule(queue, dependency),
-  processCapture: (dependencyId, body) => pipeline.processCapture(dependencyId, body),
-  pollNow: (dependencyId) => pipeline.processPoll(dependencyId),
-  rebaseline: (dependencyId) => pipeline.rebaseline(dependencyId),
-});
+// CORS: explicit allow-list, or the local UI defaults, or '*' to reflect any.
+const allowedOrigins = config.TREMUREX_ALLOWED_ORIGINS
+  ? config.TREMUREX_ALLOWED_ORIGINS.split(',')
+      .map((o) => o.trim())
+      .filter(Boolean)
+  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+// Readiness probes for GET /ready — core is only "ready" when it can reach the
+// services it depends on, so orchestrators don't route traffic too early.
+const readiness: ReadinessCheck[] = [
+  {
+    name: 'postgres',
+    check: async () => {
+      await pool.query('select 1');
+    },
+  },
+  {
+    name: 'redis',
+    check: async () => {
+      // Typed round-trip to Redis via BullMQ; throws if the connection is down.
+      await queue.getJobCounts();
+    },
+  },
+  {
+    name: 'schema-engine',
+    check: async () => {
+      const res = await request(`${config.SCHEMA_ENGINE_URL}/health`);
+      await res.body.dump();
+      if (res.statusCode !== 200) {
+        throw new Error(`schema-engine returned HTTP ${String(res.statusCode)}`);
+      }
+    },
+  },
+];
+const app = await buildApp(
+  {
+    db,
+    syncSchedule: (dependency) => syncDependencySchedule(queue, dependency),
+    processCapture: (dependencyId, body) => pipeline.processCapture(dependencyId, body),
+    pollNow: (dependencyId) => pipeline.processPoll(dependencyId),
+    rebaseline: (dependencyId) => pipeline.rebaseline(dependencyId),
+  },
+  {
+    apiToken: config.TREMUREX_API_TOKEN,
+    allowedOrigins: allowedOrigins.includes('*') ? true : allowedOrigins,
+    readiness,
+  },
+);
 const worker = createPollingWorker(config.REDIS_URL, async (dependencyId) => {
   const result = await pipeline.processPoll(dependencyId);
   app.log.info({ dependencyId, result: result.status }, 'poll processed');

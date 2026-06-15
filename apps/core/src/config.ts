@@ -16,6 +16,16 @@ const EnvSchema = z.object({
   ALERT_WEBHOOK_URL: z.preprocess(blankAsAbsent, z.url().optional()),
   SLACK_BOT_TOKEN: z.preprocess(blankAsAbsent, z.string().optional()),
   SLACK_CHANNEL: z.preprocess(blankAsAbsent, z.string().optional()),
+  /**
+   * Optional bearer token gating the REST API. Absent = no auth (the documented
+   * zero-config default). Min length keeps a token from being trivially guessable.
+   */
+  TREMUREX_API_TOKEN: z.preprocess(blankAsAbsent, z.string().min(16).optional()),
+  /**
+   * Comma-separated CORS allow-list for the browser UI. Absent = the local web
+   * UI defaults (see index.ts). A bare '*' restores reflect-any (not advised).
+   */
+  TREMUREX_ALLOWED_ORIGINS: z.preprocess(blankAsAbsent, z.string().optional()),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema>;
