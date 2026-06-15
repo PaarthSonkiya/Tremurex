@@ -20,7 +20,7 @@ import type { Db } from '../../../apps/core/src/db/client.js';
 import { runMigrations } from '../../../apps/core/src/db/migrate.js';
 import { createPipeline } from '../../../apps/core/src/pipeline/pipeline.js';
 import type { Pipeline } from '../../../apps/core/src/pipeline/pipeline.js';
-import { startWebhookReceiver } from './helpers.js';
+import { closeQuietly, startWebhookReceiver } from './helpers.js';
 import type { WebhookReceiver } from './helpers.js';
 
 const ADMIN_URL =
@@ -60,9 +60,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await app.close();
-  await Promise.all([mcp.close(), webhook.close()]);
-  await pool.end();
+  await closeQuietly(() => app.close());
+  await Promise.all([closeQuietly(() => mcp.close()), closeQuietly(() => webhook.close())]);
+  await closeQuietly(() => pool.end());
 });
 
 describe('MCP catalog drift, end to end', () => {

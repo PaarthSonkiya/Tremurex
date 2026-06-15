@@ -11,6 +11,19 @@ const SCHEMA_ENGINE_DIR = path.resolve(
   '../../../services/schema-engine',
 );
 
+/**
+ * Best-effort teardown. If `beforeAll` failed partway, some handles are still
+ * undefined and calling a method on them throws — swallow that so cleanup never
+ * masks the real setup error (and so other resources still get released).
+ */
+export async function closeQuietly(close: () => unknown): Promise<void> {
+  try {
+    await close();
+  } catch {
+    // teardown is best-effort
+  }
+}
+
 export function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = createNetServer();

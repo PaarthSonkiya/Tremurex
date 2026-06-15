@@ -15,7 +15,7 @@ import { runMigrations } from '../../../apps/core/src/db/migrate.js';
 import { createPipeline } from '../../../apps/core/src/pipeline/pipeline.js';
 import { createSchemaEngineClient } from '../../../apps/core/src/schema-engine/client.js';
 import type { JsonValue } from '@tremurex/shared';
-import { startSchemaEngine } from './helpers.js';
+import { closeQuietly, startSchemaEngine } from './helpers.js';
 import type { SchemaEngineProcess } from './helpers.js';
 
 const ADMIN_URL =
@@ -57,9 +57,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await app.close();
-  await engine.stop();
-  await pool.end();
+  await closeQuietly(() => app.close());
+  await closeQuietly(() => engine.stop());
+  await closeQuietly(() => pool.end());
 });
 
 describe('tremurex check, end to end', () => {

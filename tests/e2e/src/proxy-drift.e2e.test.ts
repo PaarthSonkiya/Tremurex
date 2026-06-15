@@ -19,7 +19,7 @@ import { runMigrations } from '../../../apps/core/src/db/migrate.js';
 import { dependencies, diffs } from '../../../apps/core/src/db/schema.js';
 import { createPipeline } from '../../../apps/core/src/pipeline/pipeline.js';
 import { createSchemaEngineClient } from '../../../apps/core/src/schema-engine/client.js';
-import { startSchemaEngine, startWebhookReceiver } from './helpers.js';
+import { closeQuietly, startSchemaEngine, startWebhookReceiver } from './helpers.js';
 import type { SchemaEngineProcess, WebhookReceiver } from './helpers.js';
 
 const ADMIN_URL =
@@ -67,9 +67,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await app.close();
-  await Promise.all([engine.stop(), webhook.close()]);
-  await pool.end();
+  await closeQuietly(() => app.close());
+  await Promise.all([closeQuietly(() => engine.stop()), closeQuietly(() => webhook.close())]);
+  await closeQuietly(() => pool.end());
 });
 
 describe('proxy capture, end to end', () => {
