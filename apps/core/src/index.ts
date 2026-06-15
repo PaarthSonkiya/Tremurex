@@ -100,6 +100,7 @@ const app = await buildApp(
     processCapture: (dependencyId, body) => pipeline.processCapture(dependencyId, body),
     pollNow: (dependencyId) => pipeline.processPoll(dependencyId),
     rebaseline: (dependencyId) => pipeline.rebaseline(dependencyId),
+    lockContract: (dependencyId, schema) => pipeline.setContractBaseline(dependencyId, schema),
   },
   {
     apiToken: config.TREMUREX_API_TOKEN,

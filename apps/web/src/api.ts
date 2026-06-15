@@ -33,6 +33,8 @@ export interface DependencyConfig {
   alertThreshold: Severity;
   enabled: boolean;
   createdAt: string;
+  /** Present when this is a contract dependency (diffed against a declared schema). */
+  contractSchema?: unknown;
 }
 
 /** A dependency in the list view, with derived status and open-drift summary. */
@@ -44,7 +46,7 @@ export interface Dependency extends DependencyConfig {
 export interface AlertRecord {
   id: string;
   diffId: string;
-  channel: 'webhook' | 'slack';
+  channel: 'webhook' | 'slack' | 'email';
   status: 'sent' | 'failed';
   error: string | null;
   createdAt: string;
@@ -59,6 +61,8 @@ export interface RegisterInput {
   pollIntervalSeconds?: number;
   baselineWindow?: number;
   alertThreshold?: Severity;
+  /** A declared JSON Schema to diff against instead of learning a baseline (REST only). */
+  contract?: Record<string, unknown>;
 }
 
 export type UpdateInput = Partial<{

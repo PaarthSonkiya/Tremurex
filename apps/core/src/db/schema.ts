@@ -32,6 +32,13 @@ export const dependencies = pgTable('dependencies', {
   headers: jsonb('headers').$type<Record<string, string>>().notNull().default({}),
   pollIntervalSeconds: integer('poll_interval_seconds').notNull().default(300),
   baselineWindow: integer('baseline_window').notNull().default(5),
+  /**
+   * A declared JSON Schema contract (REST only). When set, the dependency does
+   * not LEARN a baseline from samples — this schema is locked as the baseline at
+   * registration and every capture is diffed against it (conformance checking).
+   * Null = the default learned-baseline behaviour.
+   */
+  contractSchema: jsonb('contract_schema').$type<JsonSchema>(),
   alertThreshold: text('alert_threshold').$type<Severity>().notNull().default('WARNING'),
   enabled: boolean('enabled').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

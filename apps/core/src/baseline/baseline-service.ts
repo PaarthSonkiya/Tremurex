@@ -53,8 +53,18 @@ export interface BaselineService {
    * the active baseline, clears accumulated samples, and resolves open drift,
    * so the next captures rebuild a fresh baseline. Used when an API has
    * legitimately changed shape and the new shape should become the reference.
+   *
+   * For a contract dependency (one with a declared `contractSchema`) there is
+   * nothing to relearn: this re-asserts the contract and clears open drift.
    */
   rebaseline(dependencyId: string): Promise<{ supersededBaselineId: string | null }>;
+  /**
+   * Lock a declared JSON Schema as the active baseline directly, with no
+   * sampling — the basis of contract-conformance checking. Supersedes any
+   * existing baseline and resolves open drift. Called at registration (and
+   * reused by rebaseline for contract dependencies).
+   */
+  setContractBaseline(dependencyId: string, schema: JsonSchema): Promise<{ baselineId: string }>;
 }
 
 export type CaptureOutcome =
@@ -222,6 +232,50 @@ export function createBaselineService(
     return { phase: 'monitoring', drift: { diffRow, severity, repeat: false } };
   }
 
+  /** Supersede the active baseline + resolve drift + clear samples (shared tail). */
+  async function retireActive(tx: Tx, dependencyId: string): Promise<string | null> {
+    const active = await activeBaselineWith(tx, dependencyId);
+    if (active) {
+      await tx.update(baselines).set({ status: 'superseded' }).where(eq(baselines.id, active.id));
+    }
+    // Resolve any open drift — it is now against a baseline being retired.
+    await tx
+      .update(diffs)
+      .set({ resolvedAt: new Date() })
+      .where(and(eq(diffs.dependencyId, dependencyId), isNull(diffs.resolvedAt)));
+    // Clear accumulated samples so the next window (if any) starts from zero.
+    await tx.delete(samples).where(eq(samples.dependencyId, dependencyId));
+    return active?.id ?? null;
+  }
+
+  /** Retire whatever is active and lock `schema` as a fresh contract baseline. */
+  async function relockFromSchema(
+    tx: Tx,
+    dependencyId: string,
+    schema: JsonSchema,
+  ): Promise<{ supersededBaselineId: string | null; baselineId: string }> {
+    const supersededBaselineId = await retireActive(tx, dependencyId);
+    const inserted = await tx
+      .insert(baselines)
+      .values({ dependencyId, schema, sampleCount: 0, status: 'active' })
+      .returning();
+    const baseline = inserted[0];
+    if (!baseline) {
+      throw new Error('Contract baseline insert returned no row');
+    }
+    return { supersededBaselineId, baselineId: baseline.id };
+  }
+
+  function setContractBaseline(
+    dependencyId: string,
+    schema: JsonSchema,
+  ): Promise<{ baselineId: string }> {
+    return withLock(dependencyId, async (tx) => {
+      const { baselineId } = await relockFromSchema(tx, dependencyId, schema);
+      return { baselineId };
+    });
+  }
+
   function rebaseline(dependencyId: string): Promise<{ supersededBaselineId: string | null }> {
     return withLock(dependencyId, async (tx) => {
       const dependency = (
@@ -230,20 +284,19 @@ export function createBaselineService(
       if (!dependency) {
         throw new Error(`Unknown dependency: ${dependencyId}`);
       }
-      const active = await activeBaselineWith(tx, dependencyId);
-      if (active) {
-        await tx.update(baselines).set({ status: 'superseded' }).where(eq(baselines.id, active.id));
+      // A contract dependency has nothing to relearn: re-assert its declared
+      // schema and clear drift, rather than waiting to rebuild from samples.
+      if (dependency.contractSchema) {
+        const { supersededBaselineId } = await relockFromSchema(
+          tx,
+          dependencyId,
+          dependency.contractSchema,
+        );
+        return { supersededBaselineId };
       }
-      // Resolve any open drift — it is now against a baseline being retired.
-      await tx
-        .update(diffs)
-        .set({ resolvedAt: new Date() })
-        .where(and(eq(diffs.dependencyId, dependencyId), isNull(diffs.resolvedAt)));
-      // Clear accumulated samples so the next window starts from zero.
-      await tx.delete(samples).where(eq(samples.dependencyId, dependencyId));
-      return { supersededBaselineId: active?.id ?? null };
+      return { supersededBaselineId: await retireActive(tx, dependencyId) };
     });
   }
 
-  return { recordCapture, getActiveBaseline, rebaseline };
+  return { recordCapture, getActiveBaseline, rebaseline, setContractBaseline };
 }

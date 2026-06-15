@@ -16,17 +16,34 @@ const EMPTY: RegisterInput = {
 export function RegisterForm() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<RegisterInput>(EMPTY);
+  const [contractText, setContractText] = useState('');
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
     mutationFn: () => {
       // MCP catalogs and proxy capture don't use the poll method/cadence.
       const payload: RegisterInput = { ...form, name: form.name.trim(), url: form.url.trim() };
+      // A declared contract (REST only) is diffed against instead of a learned
+      // baseline. Parse it here so invalid JSON surfaces as a form error.
+      const trimmed = contractText.trim();
+      if (trimmed && form.kind === 'rest') {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(trimmed);
+        } catch {
+          throw new Error('Contract is not valid JSON');
+        }
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          throw new Error('Contract must be a JSON Schema object');
+        }
+        payload.contract = parsed as Record<string, unknown>;
+      }
       return registerDependency(payload);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['dependencies'] });
       setForm(EMPTY);
+      setContractText('');
       setOpen(false);
     },
   });
@@ -154,6 +171,24 @@ export function RegisterForm() {
           </select>
         </label>
       </div>
+
+      {form.kind === 'rest' && (
+        <label>
+          <span className="microlabel">Contract — JSON Schema (optional)</span>
+          <textarea
+            value={contractText}
+            rows={5}
+            spellCheck={false}
+            placeholder='{"type":"object","properties":{"id":{"type":"integer"}},"required":["id"]}'
+            onChange={(e) => {
+              setContractText(e.target.value);
+            }}
+          />
+          <span className="microlabel">
+            If set, captures are diffed against this declared schema instead of a learned baseline.
+          </span>
+        </label>
+      )}
 
       {mutation.error && <p className="status-note error">{mutation.error.message}</p>}
 

@@ -82,6 +82,32 @@ Explore via API or the web UI at `http://localhost:3000`:
 Configured header values (e.g. `authorization`) are stored for polling but always masked in API
 responses, logs, and alerts.
 
+### Checking against a declared contract
+
+Instead of _learning_ what's normal from samples, you can _declare_ it: register a REST
+dependency with a `contract` — a JSON Schema (draft 2020-12) — and Tremurex locks it as the
+baseline immediately (no baselining window) and diffs every capture against it. This turns drift
+detection into **contract-conformance checking**: a response that drops a contract-`required`
+field or changes a declared type is flagged, exactly as a learned-baseline drift would be.
+
+```sh
+curl -X POST http://localhost:4000/dependencies \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "orders-api",
+    "url": "https://api.example.com/v1/orders/42",
+    "contract": {
+      "type": "object",
+      "properties": { "id": { "type": "integer" }, "total": { "type": "number" } },
+      "required": ["id", "total"]
+    }
+  }'
+```
+
+The contract must be a self-contained schema — `$ref` is not resolved. `POST
+/dependencies/:id/rebaseline` re-asserts the contract and clears open drift (it does not relearn
+from samples). The web register form has an optional "Contract" field for the same thing.
+
 ### Managing dependencies
 
 The web UI is a full control surface — register, edit, and operate dependencies without touching

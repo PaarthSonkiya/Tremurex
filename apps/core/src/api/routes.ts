@@ -6,7 +6,7 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
-import type { JsonValue } from '@tremurex/shared';
+import type { JsonSchema, JsonValue } from '@tremurex/shared';
 import { redactHeaders } from '../capture/redact.js';
 import { jsonDepthExceeds, maxJsonDepth } from '../capture/depth.js';
 import { BlockedUrlError, assertPublicUrlSync, ssrfOptionsFromEnv } from '../capture/ssrf.js';
@@ -35,6 +35,11 @@ export interface ApiDeps {
    * POST /dependencies/:id/rebaseline route is off.
    */
   rebaseline?: (dependencyId: string) => Promise<{ supersededBaselineId: string | null }>;
+  /**
+   * Locks a declared JSON Schema contract as a dependency's baseline at
+   * registration. When absent, registering with a `contract` is rejected (501).
+   */
+  lockContract?: (dependencyId: string, schema: JsonSchema) => Promise<{ baselineId: string }>;
 }
 
 const RegisterDependency = z
@@ -51,11 +56,28 @@ const RegisterDependency = z
     /** Defaults per kind: 5 for rest (multi-sample merge), 1 for mcp (exact catalog). */
     baselineWindow: z.number().int().min(1).max(100).optional(),
     alertThreshold: z.enum(['BREAKING', 'WARNING', 'INFO']).default('WARNING'),
+    /**
+     * Optional declared JSON Schema (draft 2020-12) to diff captures against
+     * instead of a learned baseline (conformance checking). Must be a
+     * self-contained schema object — internal/external `$ref` is not resolved.
+     */
+    contract: z
+      .record(z.string(), z.unknown())
+      .refine((s) => Object.keys(s).length > 0, { error: 'contract must be a non-empty object' })
+      .optional(),
   })
   .refine((d) => !(d.kind === 'mcp' && d.captureMode === 'proxy'), {
     error: 'MCP dependencies are polled, not proxy-captured',
     path: ['captureMode'],
-  });
+  })
+  .refine((d) => !(d.contract !== undefined && d.kind === 'mcp'), {
+    error: 'a contract is for REST dependencies only',
+    path: ['contract'],
+  })
+  .refine(
+    (d) => !(d.contract !== undefined && jsonDepthExceeds(d.contract as JsonValue, maxJsonDepth())),
+    { error: 'contract nests too deeply', path: ['contract'] },
+  );
 
 /**
  * Editable operational fields. `kind` and `captureMode` define the monitoring
@@ -88,7 +110,7 @@ function maskDependency(row: DependencyRow) {
 }
 
 export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
-  const { db, syncSchedule, processCapture, pollNow, rebaseline } = deps;
+  const { db, syncSchedule, processCapture, pollNow, rebaseline, lockContract } = deps;
 
   app.post('/dependencies', async (request, reply) => {
     const parsed = RegisterDependency.safeParse(request.body);
@@ -107,9 +129,17 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
       }
       throw err;
     }
+    // A declared contract becomes the baseline directly; it needs the locking
+    // handler to be wired. `contract` maps to the contract_schema column.
+    const { contract, ...fields } = parsed.data;
+    if (contract && !lockContract) {
+      return reply.status(501).send({ error: 'contract-not-supported' });
+    }
+    const contractSchema = contract as unknown as JsonSchema | undefined;
     const values = {
-      ...parsed.data,
-      baselineWindow: parsed.data.baselineWindow ?? (parsed.data.kind === 'mcp' ? 1 : 5),
+      ...fields,
+      baselineWindow: fields.baselineWindow ?? (fields.kind === 'mcp' ? 1 : 5),
+      ...(contractSchema ? { contractSchema } : {}),
     };
     const inserted = await db.insert(dependencies).values(values).returning();
     const dependency = inserted[0];
@@ -117,6 +147,11 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
       return reply.status(500).send({ error: 'insert-failed' });
     }
     await syncSchedule(dependency);
+    // Lock the declared schema as the baseline so captures are diffed against
+    // it immediately (no sampling/baselining phase for contract dependencies).
+    if (contractSchema && lockContract) {
+      await lockContract(dependency.id, contractSchema);
+    }
     return reply.status(201).send(maskDependency(dependency));
   });
 

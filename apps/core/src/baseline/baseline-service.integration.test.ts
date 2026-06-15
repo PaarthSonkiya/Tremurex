@@ -5,6 +5,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import pg from 'pg';
+import { and, eq, isNull } from 'drizzle-orm';
 import { createDiffEntry } from '@tremurex/shared';
 import type { Diff, JsonSchema, JsonValue } from '@tremurex/shared';
 import { createDb } from '../db/client.js';
@@ -13,6 +14,7 @@ import { runMigrations } from '../db/migrate.js';
 import { alerts, baselines, dependencies, diffs, samples } from '../db/schema.js';
 import { createBaselineService } from './baseline-service.js';
 import type { DiffSchemas } from './baseline-service.js';
+import { diffSchemas } from '../diff/diff-engine.js';
 import type { SchemaInference } from '../schema-engine/client.js';
 
 const ADMIN_URL =
@@ -30,6 +32,21 @@ function fakeInference(schema: JsonSchema): SchemaInference & { calls: JsonValue
       return Promise.resolve(schema);
     },
   };
+}
+
+/** Minimal single-sample inference (genson-like): all present keys required. */
+function inferOne(v: JsonValue): JsonSchema {
+  if (v === null) return { type: 'null' };
+  if (Array.isArray(v))
+    return v.length > 0 ? { type: 'array', items: inferOne(v[0]) } : { type: 'array' };
+  if (typeof v === 'object') {
+    const properties: Record<string, JsonSchema> = {};
+    for (const [k, val] of Object.entries(v)) properties[k] = inferOne(val);
+    return { type: 'object', properties, required: Object.keys(v) };
+  }
+  if (typeof v === 'number') return { type: Number.isInteger(v) ? 'integer' : 'number' };
+  if (typeof v === 'boolean') return { type: 'boolean' };
+  return { type: 'string' };
 }
 
 let db: Db;
@@ -352,5 +369,103 @@ describe('concurrency: captures for one dependency serialize (advisory lock)', (
       (o) => o.phase === 'monitoring' && o.drift !== null && !o.drift.repeat,
     );
     expect(fresh).toHaveLength(1);
+  });
+});
+
+describe('contract baseline (declared-schema conformance)', () => {
+  const CONTRACT: JsonSchema = {
+    type: 'object',
+    properties: { id: { type: 'integer' }, email: { type: 'string' } },
+    required: ['id'],
+  };
+
+  /** A service whose inference is single-sample and whose differ is the real
+   * engine in capture mode — exactly how the pipeline wires it for REST. */
+  function contractService() {
+    const inference: SchemaInference = {
+      infer: (s) => Promise.resolve(inferOne(s[0] as JsonValue)),
+    };
+    return createBaselineService(db, inference, (b, c) => diffSchemas(b, c, { mode: 'capture' }));
+  }
+
+  async function insertContractDep(): Promise<string> {
+    const rows = await db
+      .insert(dependencies)
+      .values({ name: 'contract-dep', url: 'http://example.test/c', contractSchema: CONTRACT })
+      .returning();
+    const row = rows[0];
+    if (!row) throw new Error('insert failed');
+    return row.id;
+  }
+
+  async function openDiffCount(depId: string): Promise<number> {
+    const rows = await db
+      .select()
+      .from(diffs)
+      .where(and(eq(diffs.dependencyId, depId), isNull(diffs.resolvedAt)));
+    return rows.length;
+  }
+
+  it('locks the declared schema as the active baseline, with no samples', async () => {
+    const service = contractService();
+    const depId = await insertContractDep();
+    const { baselineId } = await service.setContractBaseline(depId, CONTRACT);
+
+    const active = await service.getActiveBaseline(depId);
+    expect(active?.id).toBe(baselineId);
+    expect(active?.schema).toEqual(CONTRACT);
+    expect(active?.sampleCount).toBe(0);
+    expect(await db.select().from(samples).where(eq(samples.dependencyId, depId))).toHaveLength(0);
+  });
+
+  it('stays quiet on a conforming capture (no baselining phase)', async () => {
+    const service = contractService();
+    const depId = await insertContractDep();
+    await service.setContractBaseline(depId, CONTRACT);
+
+    const outcome = await service.recordCapture(depId, { id: 5, email: 'a@x.test' });
+    expect(outcome).toEqual({ phase: 'monitoring', drift: null });
+  });
+
+  it('flags a capture missing a contract-required field as BREAKING', async () => {
+    const service = contractService();
+    const depId = await insertContractDep();
+    await service.setContractBaseline(depId, CONTRACT);
+
+    const outcome = await service.recordCapture(depId, { email: 'a@x.test' });
+    if (outcome.phase !== 'monitoring' || outcome.drift === null) throw new Error('expected drift');
+    expect(outcome.drift.severity).toBe('BREAKING');
+    expect(
+      outcome.drift.diffRow.entries.some(
+        (e) => e.rule === 'required-field-removed' && e.path === '$.id',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not flag an omitted OPTIONAL contract field (single capture)', async () => {
+    const service = contractService();
+    const depId = await insertContractDep();
+    await service.setContractBaseline(depId, CONTRACT);
+
+    // email is optional in the contract; a capture without it must stay quiet.
+    const outcome = await service.recordCapture(depId, { id: 9 });
+    expect(outcome).toEqual({ phase: 'monitoring', drift: null });
+  });
+
+  it('rebaseline re-asserts the contract and clears open drift', async () => {
+    const service = contractService();
+    const depId = await insertContractDep();
+    await service.setContractBaseline(depId, CONTRACT);
+    await service.recordCapture(depId, { email: 'a@x.test' }); // BREAKING → open drift
+    expect(await openDiffCount(depId)).toBe(1);
+
+    const before = await service.getActiveBaseline(depId);
+    const { supersededBaselineId } = await service.rebaseline(depId);
+
+    expect(supersededBaselineId).toBe(before?.id);
+    expect(await openDiffCount(depId)).toBe(0);
+    const after = await service.getActiveBaseline(depId);
+    expect(after?.schema).toEqual(CONTRACT);
+    expect(after?.id).not.toBe(before?.id);
   });
 });

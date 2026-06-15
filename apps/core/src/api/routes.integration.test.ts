@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { createDiffEntry } from '@tremurex/shared';
 import type { JsonValue } from '@tremurex/shared';
 import { buildApp } from '../app.js';
+import { createBaselineService } from '../baseline/baseline-service.js';
 import { createDb } from '../db/client.js';
 import type { Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
@@ -676,5 +677,71 @@ describe('POST /dependencies/:id/rebaseline', () => {
     });
     expect(res.statusCode).toBe(404);
     expect(rebaselined).toHaveLength(0);
+  });
+});
+
+describe('POST /dependencies with a declared contract', () => {
+  let contractApp: FastifyInstance;
+  const contract = {
+    type: 'object',
+    properties: { id: { type: 'integer' }, email: { type: 'string' } },
+    required: ['id'],
+  };
+
+  beforeAll(async () => {
+    // setContractBaseline never calls inference, so a stub is fine here.
+    const service = createBaselineService(db, { infer: () => Promise.resolve({ type: 'object' }) });
+    contractApp = await buildApp({
+      db,
+      syncSchedule: () => Promise.resolve(),
+      lockContract: (id, schema) => service.setContractBaseline(id, schema),
+    });
+  });
+
+  afterAll(async () => {
+    await contractApp.close();
+  });
+
+  it('stores the contract and locks it as the baseline at registration', async () => {
+    const res = await contractApp.inject({
+      method: 'POST',
+      url: '/dependencies',
+      payload: { name: 'contract-dep', url: 'https://api.test/x', contract },
+    });
+    expect(res.statusCode).toBe(201);
+    const dep = res.json<{ id: string; contractSchema: unknown }>();
+    expect(dep.contractSchema).toEqual(contract);
+
+    // A baseline exists immediately (sampleCount 0) → status is monitoring.
+    const bl = await db.select().from(baselines).where(eq(baselines.dependencyId, dep.id));
+    expect(bl).toHaveLength(1);
+    expect(bl[0]?.schema).toEqual(contract);
+    expect(bl[0]?.sampleCount).toBe(0);
+
+    const list = await contractApp.inject({ method: 'GET', url: '/dependencies' });
+    const found = list.json<{ id: string; status: string }[]>().find((d) => d.id === dep.id);
+    expect(found?.status).toBe('monitoring');
+  });
+
+  it('rejects a contract on an MCP dependency with 400', async () => {
+    const res = await contractApp.inject({
+      method: 'POST',
+      url: '/dependencies',
+      payload: { name: 'm', kind: 'mcp', url: 'https://mcp.test/x', contract: { type: 'object' } },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 501 when contract locking is not wired (default app)', async () => {
+    // `app` (the shared instance) has no lockContract handler.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/dependencies',
+      payload: { name: 'nope', url: 'https://api.test/z', contract: { type: 'object' } },
+    });
+    expect(res.statusCode).toBe(501);
+    // No row should have been inserted (the guard runs before the insert).
+    const rows = await db.select().from(dependencies).where(eq(dependencies.name, 'nope'));
+    expect(rows).toHaveLength(0);
   });
 });

@@ -5,7 +5,7 @@
 import { eq } from 'drizzle-orm';
 import { meetsThreshold } from '@tremurex/shared';
 import type { Severity } from '@tremurex/shared';
-import type { JsonValue } from '@tremurex/shared';
+import type { JsonSchema, JsonValue } from '@tremurex/shared';
 import { createBaselineService } from '../baseline/baseline-service.js';
 import type { CaptureOutcome } from '../baseline/baseline-service.js';
 import { pollEndpoint } from '../capture/poll.js';
@@ -43,6 +43,8 @@ export interface Pipeline {
   processCapture(dependencyId: string, body: JsonValue): Promise<PollResult>;
   /** Relearn a dependency's baseline from scratch (delegates to the store). */
   rebaseline(dependencyId: string): Promise<{ supersededBaselineId: string | null }>;
+  /** Lock a declared JSON Schema contract as the baseline (delegates). */
+  setContractBaseline(dependencyId: string, schema: JsonSchema): Promise<{ baselineId: string }>;
 }
 
 export function createPipeline(opts: {
@@ -120,5 +122,7 @@ export function createPipeline(opts: {
     processPoll,
     processCapture,
     rebaseline: (dependencyId) => baselineService.rebaseline(dependencyId),
+    setContractBaseline: (dependencyId, schema) =>
+      baselineService.setContractBaseline(dependencyId, schema),
   };
 }

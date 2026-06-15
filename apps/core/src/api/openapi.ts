@@ -71,6 +71,12 @@ export const openApiDocument = {
           pollIntervalSeconds: { type: 'integer', minimum: 5, maximum: 86400, default: 300 },
           baselineWindow: { type: 'integer', minimum: 1, maximum: 100 },
           alertThreshold: { ...severity, default: 'WARNING' },
+          contract: {
+            type: 'object',
+            description:
+              'Optional declared JSON Schema (draft 2020-12) to diff captures against instead of a learned baseline (conformance checking). REST only; must be self-contained ($ref is not resolved).',
+            additionalProperties: true,
+          },
         },
       },
       Dependency: {
