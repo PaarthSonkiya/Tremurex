@@ -64,7 +64,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   const url = values.url ?? process.env.TREMUREX_CORE_URL ?? 'http://localhost:4000';
-  const client = createCoreClient(url);
+  const client = createCoreClient(url, process.env.TREMUREX_API_TOKEN);
 
   try {
     const { code, output } = await runCheck(client, {
