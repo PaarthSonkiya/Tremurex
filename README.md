@@ -34,6 +34,21 @@ curl http://localhost:8000/health   # schema-engine
 open http://localhost:3000          # web UI
 ```
 
+## See it catch a breaking change (60-second demo)
+
+No real API needed — Tremurex ships with a controllable mock you can drift on demand.
+
+```sh
+docker compose --profile demo up -d   # the 5 core services + a bundled mock API
+./scripts/demo.sh                     # register → baseline → mutate → catch the drift
+```
+
+`demo.sh` registers the mock API, learns its baseline from a few samples, then changes the
+mock's response (a field type flips and a required field disappears) and shows Tremurex
+classifying both as **BREAKING**. Open `http://localhost:3000` to see the same drift in the UI.
+
+![Tremurex catching a breaking change in the bundled demo](docs/demo.gif)
+
 ## Using it
 
 Register an endpoint to monitor:
@@ -205,30 +220,30 @@ step) and then either call the CLI directly:
     refresh: 'true'
 ```
 
-### Manufacture drift in 2 minutes (demo)
+### Manufacture drift yourself
+
+The fastest path is the [60-second demo](#see-it-catch-a-breaking-change-60-second-demo) above
+(`./scripts/demo.sh` against the `demo` compose profile). To drive the bundled mock API by hand
+instead — the mock exposes `PUT /__control/response` to swap its body at runtime:
 
 ```sh
-# 1. Start the controllable mock API on your host (port 5050):
-pnpm --filter @tremurex/mock-api start
+docker compose --profile demo up -d                       # mock API on :5050
 
-# 2. Register it with a short cadence and small window
-#    (host.docker.internal lets the core container reach your host):
+# Register it (the core container reaches the mock at http://mock-api:5050):
 curl -X POST http://localhost:4000/dependencies \
   -H 'content-type: application/json' \
-  -d '{"name":"widget-api","url":"http://host.docker.internal:5050/api/widget","pollIntervalSeconds":5,"baselineWindow":3}'
+  -d '{"name":"widget-api","url":"http://mock-api:5050/api/widget","pollIntervalSeconds":5,"baselineWindow":3}'
 
-# 3. Wait ~15s for the baseline to lock (watch http://localhost:3000), then
-#    mutate the response — remove a required field, change a type:
+# Once the baseline locks (watch http://localhost:3000), mutate the response —
+# remove a required field, change a type — to manufacture BREAKING drift:
 curl -X PUT http://localhost:5050/__control/response \
   -H 'content-type: application/json' \
-  -d '{"id":"WID-7341","name":"seismograph-9000","status":"active","tags":["sensor"]}'
-
-# 4. Within one poll the timeline shows BREAKING drift:
-#    required-field-removed at $.price, field-type-changed at $.id.
+  -d '{"id":7341,"name":"seismograph-9000","price":{"amount":"1299.50","currency":"USD"},"tags":["sensor"]}'
 ```
 
-The same works for MCP: `pnpm --filter @tremurex/mock-api start:mcp` serves a mock MCP server
-on port 5051 (register `http://host.docker.internal:5051/mcp` with `"kind": "mcp"`), and
+Prefer running the mock on your host (`pnpm --filter @tremurex/mock-api start`)? Register it at
+`http://host.docker.internal:5050/api/widget` so the core container can reach it. The same works
+for MCP: `pnpm --filter @tremurex/mock-api start:mcp` serves a mock MCP server on port 5051, and
 `PUT http://localhost:5051/__control/tools` mutates its tool catalog.
 
 ## Health & API reference
@@ -270,6 +285,8 @@ services/proxy         Python mitmproxy addon: passive capture → core /ingest 
 packages/shared        Shared TS domain types (schema model, Diff, Severity)
 tests/mock-api         Controllable mock REST + MCP servers for manufacturing drift
 tests/e2e              End-to-end drift proofs (REST poll, MCP, proxy capture, CI gate)
+scripts/demo.sh        One-command guided demo (the `demo` compose profile)
+docs/demo.tape         VHS script that regenerates docs/demo.gif
 ```
 
 See `CLAUDE.md` for the full project spec, architecture, and severity semantics,

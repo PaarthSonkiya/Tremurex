@@ -3,10 +3,13 @@ import { startMockApi } from './mock-api.js';
 import type { MockApi } from './mock-api.js';
 
 const port = Number(process.env.MOCK_API_PORT ?? 5050);
+// Loopback by default; the demo container sets 0.0.0.0 so the published port
+// and the compose network can reach it.
+const host = process.env.MOCK_API_HOST ?? '127.0.0.1';
 
 let api: MockApi;
 try {
-  api = await startMockApi(port);
+  api = await startMockApi(port, host);
 } catch (err) {
   if (err instanceof Error && 'code' in err && err.code === 'EADDRINUSE') {
     console.error(

@@ -111,6 +111,23 @@ services:
       core:
         condition: service_healthy
 
+  # Guided demo target. Opt-in (keeps the default `docker compose up` to the
+  # five core services per §11): start with `docker compose --profile demo up`,
+  # then run `./scripts/demo.sh`. A controllable mock API whose response body
+  # can be mutated at runtime to manufacture drift on demand.
+  mock-api:
+    build:
+      context: tests/mock-api
+    profiles: ['demo']
+    ports:
+      - '${MOCK_API_PORT:-5050}:5050'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:5050/health']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+
 volumes:
   postgres-data:
   redis-data:

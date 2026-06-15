@@ -45,7 +45,13 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-export function startMockApi(port = 0): Promise<MockApi> {
+/**
+ * @param port 0 picks a free port (the default for in-process tests).
+ * @param host bind address. Defaults to loopback so tests never expose a port;
+ *   the demo container overrides it to 0.0.0.0 so the published port and the
+ *   compose network can reach it.
+ */
+export function startMockApi(port = 0, host = '127.0.0.1'): Promise<MockApi> {
   let response: unknown = DEFAULT_RESPONSE;
 
   const server: Server = createServer((req, res) => {
@@ -72,7 +78,7 @@ export function startMockApi(port = 0): Promise<MockApi> {
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, host, () => {
       const address = server.address();
       if (address === null || typeof address === 'string') {
         reject(new Error('mock-api: no bound address'));
