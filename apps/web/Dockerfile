@@ -10,6 +10,6 @@ RUN pnpm install --frozen-lockfile --filter @tremurex/web --ignore-scripts
 COPY apps/web apps/web
 RUN pnpm --filter @tremurex/web build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.31-alpine
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 EXPOSE 80
