@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { JsonValue } from '@tremurex/shared';
 import { redactHeaders } from '../capture/redact.js';
+import { BlockedUrlError, assertPublicUrlSync, ssrfOptionsFromEnv } from '../capture/ssrf.js';
 import type { Db } from '../db/client.js';
 import { alerts, baselines, dependencies, diffs, samples } from '../db/schema.js';
 import type { DependencyRow } from '../db/schema.js';
@@ -95,6 +96,16 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
         .status(400)
         .send({ error: 'invalid-body', issues: z.treeifyError(parsed.error) });
     }
+    // SSRF: reject an obviously-blocked target up front (literal-IP/scheme).
+    // The poller re-checks with DNS at fetch time.
+    try {
+      assertPublicUrlSync(parsed.data.url, ssrfOptionsFromEnv());
+    } catch (err) {
+      if (err instanceof BlockedUrlError) {
+        return reply.status(400).send({ error: 'blocked-url', reason: err.reason });
+      }
+      throw err;
+    }
     const values = {
       ...parsed.data,
       baselineWindow: parsed.data.baselineWindow ?? (parsed.data.kind === 'mcp' ? 1 : 5),
@@ -143,6 +154,16 @@ export function registerApiRoutes(app: FastifyInstance, deps: ApiDeps): void {
       return reply
         .status(400)
         .send({ error: 'invalid-body', issues: z.treeifyError(parsed.error) });
+    }
+    if (parsed.data.url !== undefined) {
+      try {
+        assertPublicUrlSync(parsed.data.url, ssrfOptionsFromEnv());
+      } catch (err) {
+        if (err instanceof BlockedUrlError) {
+          return reply.status(400).send({ error: 'blocked-url', reason: err.reason });
+        }
+        throw err;
+      }
     }
     const updated = await db
       .update(dependencies)

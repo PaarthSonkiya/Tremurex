@@ -15,6 +15,18 @@ beforeAll(async () => {
       res.end(JSON.stringify({ id: 1, api_key: 'leaky-secret' }));
     } else if (req.url === '/html') {
       res.end('<html>not json</html>');
+    } else if (req.url === '/huge-declared') {
+      // Honest, oversized content-length: must be rejected before downloading.
+      const payload = JSON.stringify({ blob: 'x'.repeat(4096) });
+      res.setHeader('content-type', 'application/json');
+      res.setHeader('content-length', String(Buffer.byteLength(payload)));
+      res.end(payload);
+    } else if (req.url === '/huge-chunked') {
+      // Chunked (no content-length): must be rejected mid-stream by the byte cap.
+      res.setHeader('content-type', 'application/json');
+      res.write('{"blob":"');
+      for (let i = 0; i < 64; i++) res.write('x'.repeat(1024));
+      res.end('"}');
     } else {
       res.statusCode = 500;
       res.end('boom');
@@ -58,6 +70,36 @@ describe('pollEndpoint', () => {
     await expect(
       pollEndpoint({ url: `${baseUrl}/html`, method: 'GET', headers: {} }),
     ).rejects.toMatchObject({ kind: 'not-json' });
+  });
+
+  it('rejects an oversized declared content-length without downloading the body', async () => {
+    const prev = process.env.TREMUREX_MAX_RESPONSE_BYTES;
+    process.env.TREMUREX_MAX_RESPONSE_BYTES = '1024';
+    try {
+      await expect(
+        pollEndpoint({ url: `${baseUrl}/huge-declared`, method: 'GET', headers: {} }),
+      ).rejects.toMatchObject({ kind: 'too-large' });
+    } finally {
+      process.env.TREMUREX_MAX_RESPONSE_BYTES = prev;
+    }
+  });
+
+  it('rejects an oversized chunked body mid-stream (no content-length to trust)', async () => {
+    const prev = process.env.TREMUREX_MAX_RESPONSE_BYTES;
+    process.env.TREMUREX_MAX_RESPONSE_BYTES = '1024';
+    try {
+      await expect(
+        pollEndpoint({ url: `${baseUrl}/huge-chunked`, method: 'GET', headers: {} }),
+      ).rejects.toMatchObject({ kind: 'too-large' });
+    } finally {
+      process.env.TREMUREX_MAX_RESPONSE_BYTES = prev;
+    }
+  });
+
+  it('refuses to poll a cloud-metadata address (SSRF guard)', async () => {
+    await expect(
+      pollEndpoint({ url: 'http://169.254.169.254/latest/meta-data', method: 'GET', headers: {} }),
+    ).rejects.toMatchObject({ kind: 'blocked' });
   });
 
   it('classifies unreachable hosts as network errors without leaking headers', async () => {
