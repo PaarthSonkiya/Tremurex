@@ -14,7 +14,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@slack/web-api": "^7.17.0",
     "@tremurex/shared": "workspace:*",
-    "bullmq": "^5.78.0",
+    "bullmq": "^5.79.1",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.8.5",
     "nodemailer": "^9.0.0",
