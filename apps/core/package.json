@@ -16,7 +16,7 @@
     "@tremurex/shared": "workspace:*",
     "bullmq": "^5.78.0",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.8.5",
+    "fastify": "^5.9.0",
     "nodemailer": "^9.0.0",
     "pg": "^8.21.0",
     "undici": "^6.26.0",
