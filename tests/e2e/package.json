@@ -9,7 +9,7 @@
   "dependencies": {
     "@tremurex/cli": "workspace:*",
     "@tremurex/mock-api": "workspace:*",
-    "fastify": "^5.8.5",
+    "fastify": "^5.9.0",
     "pg": "^8.21.0"
   },
   "devDependencies": {
